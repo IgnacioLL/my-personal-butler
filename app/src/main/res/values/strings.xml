@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Personal Assistant</string>
+    
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_calls">Calls</string>
+    <string name="nav_calendar">Calendar</string>
+    <string name="nav_tasks">Tasks</string>
+    <string name="nav_alarms">Alarms</string>
+    <string name="nav_settings">Settings</string>
+    
+    <!-- Voice Commands -->
+    <string name="voice_listening">Listening…</string>
+    <string name="voice_processing">Processing…</string>
+    <string name="voice_command_recognized">Command recognized</string>
+    <string name="voice_error">Voice command error</string>
+    <string name="voice_permission_required">Microphone permission required</string>
+    
+    <!-- Call Features -->
+    <string name="call_incoming">Incoming call</string>
+    <string name="call_outgoing">Outgoing call</string>
+    <string name="call_missed">Missed call</string>
+    <string name="call_duration">Duration</string>
+    <string name="call_screen">Screen call</string>
+    <string name="call_block">Block caller</string>
+    
+    <!-- Calendar Features -->
+    <string name="calendar_create_event">Create event</string>
+    <string name="calendar_event_title">Event title</string>
+    <string name="calendar_event_date">Event date</string>
+    <string name="calendar_event_time">Event time</string>
+    <string name="calendar_event_description">Event description</string>
+    <string name="calendar_sync_gmail">Sync with Gmail</string>
+    
+    <!-- Task Features -->
+    <string name="task_create">Create task</string>
+    <string name="task_title">Task title</string>
+    <string name="task_description">Task description</string>
+    <string name="task_due_date">Due date</string>
+    <string name="task_priority">Priority</string>
+    <string name="task_completed">Completed</string>
+    <string name="task_pending">Pending</string>
+    
+    <!-- Alarm Features -->
+    <string name="alarm_create">Create alarm</string>
+    <string name="alarm_time">Alarm time</string>
+    <string name="alarm_repeat">Repeat</string>
+    <string name="alarm_label">Alarm label</string>
+    <string name="alarm_snooze">Snooze</string>
+    <string name="alarm_dismiss">Dismiss</string>
+    
+    <!-- Settings -->
+    <string name="settings_voice">Voice Settings</string>
+    <string name="settings_permissions">Permissions</string>
+    <string name="settings_api_keys">API Keys</string>
+    <string name="settings_database">Database</string>
+    <string name="settings_about">About</string>
+    
+    <!-- Permissions -->
+    <string name="permission_microphone">Microphone access needed for voice commands</string>
+    <string name="permission_calls">Call access needed for call monitoring</string>
+    <string name="permission_calendar">Calendar access needed for scheduling</string>
+    <string name="permission_notifications">Notification access needed for monitoring</string>
+    <string name="permission_accessibility">Accessibility access needed for WhatsApp monitoring</string>
+    
+    <!-- Errors -->
+    <string name="error_network">Network error</string>
+    <string name="error_api">API error</string>
+    <string name="error_database">Database error</string>
+    <string name="error_permission">Permission denied</string>
+    <string name="error_unknown">Unknown error occurred</string>
+    
+    <!-- Success Messages -->
+    <string name="success_task_created">Task created successfully</string>
+    <string name="success_event_created">Event created successfully</string>
+    <string name="success_alarm_set">Alarm set successfully</string>
+    <string name="success_call_screened">Call screened successfully</string>
+    
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="edit">Edit</string>
+    <string name="loading">Loading…</string>
+    <string name="no_data">No data available</string>
+    <string name="retry">Retry</string>
+</resources>
