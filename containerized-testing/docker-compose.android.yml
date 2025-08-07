@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  android-emulator:
+    image: budtmo/docker-android:emulator_14.0
+    container_name: personal-assistant-android-emulator
+    environment:
+      - DEVICE=Samsung Galaxy S10
+      - WEB_VNC=true
+      - VERSION=14.6
+    volumes:
+      - /dev/kvm:/dev/kvm
+    ports:
+      - "6080:6080"  # VNC Web interface
+      - "5554:5554"  # Emulator console
+      - "5555:5555"  # ADB
+    privileged: true
+    restart: unless-stopped

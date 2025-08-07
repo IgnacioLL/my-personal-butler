@@ -1,0 +1,24 @@
+# This file contains local configuration overrides.
+# Copy this file to local.properties and fill in your actual API keys
+
+# AssemblyAI API Key for speech-to-text
+ASSEMBLY_AI_API_KEY=your_assembly_ai_api_key_here
+
+# OpenAI API Key for LLM processing
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Google API Configuration
+GOOGLE_CALENDAR_CLIENT_ID=your_google_calendar_client_id_here
+GOOGLE_GMAIL_CLIENT_ID=your_google_gmail_client_id_here
+GOOGLE_CLIENT_SECRET=your_google_client_secret_here
+
+# PostgreSQL Database Configuration
+POSTGRESQL_URL=jdbc:postgresql://your-database-host:5432/personal_assistant
+POSTGRESQL_USERNAME=your_database_username
+POSTGRESQL_PASSWORD=your_database_password
+
+# Optional: Alternative LLM API
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# SDK Configuration
+sdk.dir=/path/to/your/android/sdk
