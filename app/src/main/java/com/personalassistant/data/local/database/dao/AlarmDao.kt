@@ -6,42 +6,27 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface AlarmDao {
-    @Query("SELECT * FROM alarms ORDER BY time ASC")
-    suspend fun getAllAlarms(): List<AlarmEntity>
+    @Insert
+    suspend fun insert(alarm: AlarmEntity): Long
     
     @Query("SELECT * FROM alarms ORDER BY time ASC")
-    fun getAllAlarmsFlow(): Flow<List<AlarmEntity>>
+    fun getAllAlarms(): Flow<List<AlarmEntity>>
     
     @Query("SELECT * FROM alarms WHERE id = :id")
     suspend fun getAlarmById(id: Long): AlarmEntity?
     
-    @Query("SELECT * FROM alarms WHERE isEnabled = 1 ORDER BY time ASC")
-    suspend fun getEnabledAlarms(): List<AlarmEntity>
-    
-    @Query("SELECT * FROM alarms WHERE isEnabled = 1 ORDER BY time ASC")
-    fun getEnabledAlarmsFlow(): Flow<List<AlarmEntity>>
-    
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAlarm(alarm: AlarmEntity): Long
-    
     @Update
-    suspend fun updateAlarm(alarm: AlarmEntity): Int
+    suspend fun update(alarm: AlarmEntity)
     
     @Delete
-    suspend fun deleteAlarm(alarm: AlarmEntity): Int
+    suspend fun delete(alarm: AlarmEntity)
     
-    @Query("DELETE FROM alarms WHERE id = :id")
-    suspend fun deleteAlarmById(id: Long): Int
+    @Query("SELECT * FROM alarms WHERE isEnabled = 1 ORDER BY nextTriggerTime ASC LIMIT 1")
+    suspend fun getNextEnabledAlarm(): AlarmEntity?
     
-    @Query("UPDATE alarms SET isEnabled = 1 WHERE id = :id")
-    suspend fun enableAlarm(id: Long): Int
+    @Query("SELECT * FROM alarms WHERE isEnabled = 1 AND nextTriggerTime IS NOT NULL ORDER BY nextTriggerTime ASC")
+    suspend fun getEnabledAlarmsWithNextTrigger(): List<AlarmEntity>
     
-    @Query("UPDATE alarms SET isEnabled = 0 WHERE id = :id")
-    suspend fun disableAlarm(id: Long): Int
-    
-    @Query("SELECT COUNT(*) FROM alarms")
-    suspend fun getAlarmCount(): Int
-    
-    @Query("SELECT COUNT(*) FROM alarms WHERE isEnabled = 1")
-    suspend fun getEnabledAlarmCount(): Int
+    @Query("SELECT * FROM alarms WHERE isEnabled = 1")
+    suspend fun getEnabledAlarms(): List<AlarmEntity>
 }

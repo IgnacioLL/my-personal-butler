@@ -64,11 +64,20 @@
     <string name="permission_notifications">Notification access needed for monitoring</string>
     <string name="permission_accessibility">Accessibility access needed for WhatsApp monitoring</string>
     
+    <!-- Accessibility Service -->
+    <string name="accessibility_service_description">Personal Assistant accessibility service for monitoring and automation</string>
+    
     <!-- Errors -->
     <string name="error_network">Network error</string>
+    <string name="error_network_io">Network I/O error</string>
+    <string name="error_network_timeout">Network timeout</string>
     <string name="error_api">API error</string>
     <string name="error_database">Database error</string>
     <string name="error_permission">Permission denied</string>
+    <string name="error_invalid_time">Invalid time format</string>
+    <string name="error_alarm_scheduling">Failed to schedule alarm</string>
+    <string name="error_ringtone">Ringtone error</string>
+    <string name="error_vibration">Vibration error</string>
     <string name="error_unknown">Unknown error occurred</string>
     
     <!-- Success Messages -->

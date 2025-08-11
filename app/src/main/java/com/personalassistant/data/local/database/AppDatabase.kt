@@ -7,6 +7,8 @@ import androidx.room.TypeConverters
 import android.content.Context
 import com.personalassistant.data.local.database.dao.AlarmDao
 import com.personalassistant.data.local.database.entities.AlarmEntity
+import com.personalassistant.data.local.database.converters.Converters
+import com.personalassistant.data.local.database.migrations.MIGRATION_1_2
 
 @Database(
     entities = [
