@@ -244,7 +244,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-17
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** WhatsApp → Android → call ordered touches; no buy/book/self-mod on call session.
 - **Acceptance:** T4 exit.
 - **Result:** _(agent)_
@@ -397,6 +397,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:00 | TASK-17 | subagent-A | cursor-grok-4.5-high | implement | Mock voice calls + INV-APPR-005 + escalation |
 | 2026-08-09 00:15 | TASK-17 | Agent A | cursor-grok-4.5-high | implement | Mock voice + INV-APPR-005 + ladder; status → review |
 | 2026-08-08 23:05 | TASK-17 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01/03/04/05 exit 0; call-mode + ladder + summary spot-checks; E2E-02 ready; status → done |
+| 2026-08-09 00:10 | TASK-18 | subagent-A | cursor-grok-4.5-high | implement | E2E-02 habit escalation ladder |
 
 ---
 
@@ -419,5 +420,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-17 done (mock voice + INV-APPR-005 + escalation ladder).  
-**Next:** TASK-18 (E2E-02 habit escalation ladder).
+**Now:** TASK-18 in_progress (E2E-02).  
+**Next:** TASK-18 Agent B, then Phase 5 bookings.
