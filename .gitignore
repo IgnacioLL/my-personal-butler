@@ -1,0 +1,17 @@
+# Test artifacts (convention: artifacts/test/<task-or-flow>/)
+artifacts/test/**/*
+!artifacts/test/README.md
+!artifacts/test/.gitkeep
+
+# Local config with secrets (use *.example templates)
+config/gateway.local.*
+config/harness.local.*
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

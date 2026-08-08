@@ -46,11 +46,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** queued
+- **Status:** review
 - **Scope:** Create implementable repo skeleton around the plan (not only docs): package/workspace layout suitable for OpenClaw Gateway skills/tools, `README` pointing at `agent-plan/`, dirs for `src/` (or agreed layout), `fixtures/`, `artifacts/test/`, `scripts/`, config placeholders. Do **not** invent a custom runtime — prefer OpenClaw primitives per architecture.
 - **Acceptance:** Layout committed; empty `test:ci` stub or documented command; B reviews against architecture.md.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS — OpenClaw Gateway–centric skeleton landed: `src/skills`, `src/tools`, `config/` placeholders, six fixture packs, `artifacts/test/` convention, root `README.md`. `test:ci` stub via `./scripts/test-ci.sh` and `make test-ci` (no-op exit 0; TASK-01 wires layers + INV-* fail-closed). No package installs; `agent-plan/` untouched.
+- **Artifacts:** `README.md`, `Makefile`, `.gitignore`, `config/`, `src/`, `fixtures/{audio,approvals,calendar,memory,browser,selfmod}/`, `artifacts/test/`, `scripts/test-ci.sh`
 
 ### TASK-01 — Test harness scaffolding (T0)
 - **Phase:** 0 / T0
@@ -344,7 +344,8 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 | Time (UTC) | Task | Agent | Model | Role | Notes |
 | --- | --- | --- | --- | --- | --- |
-| _(pending)_ | TASK-00 | — | composer-2.5 | A/B | First dispatch |
+| 2026-08-08 21:46 | TASK-00 | subagent-A | composer-2.5 | implement | First dispatch — bootstrap layout |
+| 2026-08-08 21:50 | TASK-00 | Agent A | composer-2.5 | implement | Bootstrap complete — layout + test:ci stub; status → review |
 
 ---
 
@@ -365,5 +366,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-00 (bootstrap) — dispatch implement + review pair.  
+**Now:** TASK-00 (bootstrap) — Agent A done; Agent B review.  
 **Next:** TASK-01 (test harness T0) once TASK-00 is `done`.

@@ -1,0 +1,35 @@
+# OpenClaw Gateway — example profile (no secrets).
+# Copy to gateway.local.yaml and fill in channel tokens outside git.
+#
+# Docs: agent-plan/architecture.md, agent-plan/operations/hosting.md
+
+gateway:
+  name: personal-agent
+  # session_policy: one primary personal DM session (see architecture.md)
+
+channels:
+  whatsapp:
+    enabled: false
+    allowlist_dm_only: true
+    groups_enabled: false
+  voice_calls:
+    enabled: false
+  android:
+    enabled: false
+
+intelligence:
+  default_model: luna
+  escalation_model: terra-sol
+  transcription:
+    # Dedicated STT — see agent-plan/intelligence/transcription.md
+    provider: placeholder
+
+cron:
+  heartbeat_enabled: false
+
+approvals:
+  # Trust core hooks — see agent-plan/trust-and-safety/approval-matrix.md
+  store_path: ./data/approvals
+
+memory:
+  profile_path: ./data/memory/profile
