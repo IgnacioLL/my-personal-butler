@@ -134,7 +134,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-06, TASK-07, Virtual User (TASK-01)
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Full E2E-01 from `testing/e2e-flows.md` with stubs; write `artifacts/test/e2e-01/` + verification.json.
 - **Acceptance:** T1 exit — voice-note reminder green without human phone.
 - **Result:** _(agent)_
@@ -368,6 +368,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:16 | TASK-07 | subagent-A | cursor-grok-4.5-high | implement | Reminders + habits with fake clock |
 | 2026-08-08 22:17 | TASK-07 | Agent A | cursor-grok-4.5-high | implement | Reminders/habits complete — FakeClock fire + confirm; status → review |
 | 2026-08-08 22:20 | TASK-07 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; parse/fire/auto spot-checks; task-07 artifact stomp fix; status → done |
+| 2026-08-08 22:21 | TASK-08 | subagent-A | cursor-grok-4.5-high | implement | E2E-01 Virtual User voice reminder journey |
 
 ---
 
