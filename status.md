@@ -35,7 +35,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | Fake clock utility | done | `src/harness/clock.py` — `now()` / `advance(duration)` |
 | INV-* runner skeleton | done | `src/harness/inv_runner.py` + `src/invariants/` |
 | Virtual User harness | done | `src/harness/virtual_user.py` — inject audio/text, create reminders, assert state (E2E-01 gate) |
-| Phase exits require matching T* unlock | done | **T8 exit PASS** (TASK-25); **CI gate map** (TASK-26): `docs/ci-gates.md` + `gate_e2e` E2E-01..10 |
+| Phase exits require matching T* unlock | done | **T8 exit PASS** (TASK-25); **CI gate map PASS** (TASK-26): `docs/ci-gates.md` ↔ `agent-plan/testing/ci-gates.md`; `gate_e2e` E2E-01..10 + `gate_deny_paths` E2E-04/06/07/08 |
 
 ---
 
@@ -332,10 +332,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-01
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Wire `testing/ci-gates.md` merge gate set; map new behavior into component-matrix; ensure gate-tagged e2e list expands as phases land.
 - **Acceptance:** Documented `test:ci` matches plan; B audits gaps.
-- **Result:** Agent A — Audited merge gate vs `ci-gates.md`: four layers (unit → contract/23 INV-* → integration → e2e E2E-01..10) already wired in `run_test_ci.py`/`test-ci.sh`; E2E-07/E2E-08 deny paths gate-green. Added `docs/ci-gates.md` (INV table, gate e2e inventory, component-matrix mapping, intentional deferrals). Tightened `verification.json` stamp (`gate_deny_paths`, `gate_map`). Updated README + scripts/artifacts README. `make test-ci` + `make test-ci-fail-closed` PASS.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0. Audited `docs/ci-gates.md` vs `agent-plan/testing/ci-gates.md`: four layers (unit → contract/23 INV-* → integration → e2e E2E-01..10) match `run_test_ci.py`/`test-ci.sh`. `verification.json` → `result: PASS`, `invariants` length 23, `gate_e2e` length 10, `gate_deny_paths` includes E2E-07 (`e2e-07.deny_buys_nothing`) + E2E-08 (`e2e-08.deny_leaves_tree_unchanged`). Deny stamps: `e2e-07` → `buy_count_after_deny: 0`; `e2e-08` → `tree_clean_after_deny: true`. INV-* intact (no weaken). No code fixes required.
 - **Artifacts:** `docs/ci-gates.md`, `scripts/run_test_ci.py`, `README.md`, `scripts/README.md`, `artifacts/test/README.md`
 
 ---
@@ -423,6 +423,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:55 | TASK-25 | Agent B | cursor-grok-4.5-high | review | PASS — soak/e2e-10/spot-checks; CI t8_exit stamp fix; T8 exit; status → done |
 | 2026-08-09 02:40 | TASK-26 | subagent-A | composer-2.5 | implement | CI gates audit + component-matrix mapping docs |
 | 2026-08-09 02:55 | TASK-26 | Agent A | composer-2.5 | implement | GATE_MAP docs + verification stamp; status → review |
+| 2026-08-09 03:00 | TASK-26 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; ci-gates audit + E2E-07/08 deny paths; status → done |
 
 ---
 
@@ -445,5 +446,4 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-26 review (Agent B — audit `docs/ci-gates.md` + `make test-ci` / fail-closed).  
-**Next:** TASK-26 Agent B closeout → done.
+**Board complete** — TASK-00..26 all `done`. CI merge gate documented in `docs/ci-gates.md`; `make test-ci` + `make test-ci-fail-closed` green.
