@@ -112,7 +112,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-03, TASK-01
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** STT stub + audio fixture pack; every voice note → transcript or clarification (`INV-INGRESS-003`); optional TTS policy hooks. See `intelligence/transcription.md`.
 - **Acceptance:** Fixture map audio→transcript; E2E-01 dependency ready.
 - **Result:** _(agent)_
