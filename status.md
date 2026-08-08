@@ -178,10 +178,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-10, TASK-11
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Implement and green E2E-03; artifacts + verification stamp.
 - **Acceptance:** Gate-tagged e2e green.
-- **Result:** PASS (Agent A implement) — `make e2e-03` exit 0; `make test-ci` exit 0; `make test-ci-fail-closed` exit 0; `make e2e-01` exit 0. E2E-03 gate in test:ci e2e layer (`gate_flows`: E2E-01 + E2E-03). WhatsApp “Add todo: buy oat milk” Auto → Android `list_todos`/`get_todo` same id/title/open; `complete_todo` → store `done`. Artifacts `artifacts/test/e2e-03/{report.json,verification.json}`. Fail-closed does not stomp e2e-03 verification. INV-* intact. **T2 scope complete** — todo sync gate green; T2 exit (Accept/Deny alone, TASK-11) already met.
+- **Result:** PASS (Agent B review) — Re-ran `make e2e-03` exit 0, `make e2e-01` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0. Spot-checks: WhatsApp “Add todo: buy oat milk” Auto → Android `list_todos`/`get_todo` same id/title/open; `complete_todo` → store `done`. E2E-03 artifacts `gate: true` in `report.json` + `verification.json` (all five checks stamped). Fail-closed does not stomp e2e-03 verification. INV-* intact (no weaken). **T2 exit PASS** — E2E-03 todo sync gate green; Accept/Deny alone (TASK-11) already met. No code fixes required. Ready for Phase 3 (TASK-13+).
 - **Artifacts:** `scripts/run_e2e_03.py`, `Makefile` (`e2e-03`), `scripts/run_test_ci.py` (e2e layer gate), `src/harness/virtual_user.py` (`run_e2e_03` gate stamp), `scripts/test-ci.sh`, `artifacts/test/e2e-03/{report.json,verification.json,todos.json,android-projection.json}` (runtime; gitignored)
 
 ### TASK-13 — Calendar read/write + soft confirm
@@ -381,6 +381,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:36 | TASK-11 | Agent A | cursor-grok-4.5-high | implement | Android inbox + soft-confirm hooks; T2 exit; status → review |
 | 2026-08-08 22:36 | TASK-11 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01 exit 0; Accept/Deny/Edit + create_count=0 spot-checks; T2 exit; status → done |
 | 2026-08-08 22:48 | TASK-12 | subagent-A | composer-2.5 | implement | E2E-03 gate-tagged todo WhatsApp → Android; status → review |
+| 2026-08-08 22:40 | TASK-12 | Agent B | composer-2.5 | review | PASS — e2e-03/e2e-01/test-ci/fail-closed exit 0; gate:true artifacts; T2 exit; status → done |
 
 ---
 
@@ -402,5 +403,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-12 in review (E2E-03 gate).  
-**Next:** TASK-12 Agent B, then Phase 3 (TASK-13+).
+**Now:** TASK-12 done (E2E-03 gate green; T2 exit PASS).  
+**Next:** Phase 3 — TASK-13 (calendar read/write + soft confirm).
