@@ -189,10 +189,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** In-memory calendar; conflict-aware suggestions; soft confirm before write (`INV-APPR-003`). Per `capabilities/calendar.md`.
 - **Acceptance:** Integration + E2E-04 green.
-- **Result:** Implement complete (Agent A) — In-memory `CalendarStore` with conflict detection + free-slot suggestions; `CalendarService` proposes soft-confirm creates (adapter `create_count` stays 0 until Android Accept; Deny creates nothing). NL path “Schedule focus block Friday 09:00–11:00.” wired through VirtualUser. Unit + integration checks green; `INV-APPR-003` intact. `make test-ci`, `make test-ci-fail-closed`, `make e2e-01`, `make e2e-03` exit 0. E2E-04 ready for TASK-14 (accept/deny create-count assertions).
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-01` exit 0, `make e2e-03` exit 0. Spot-checks: NL propose → `create_count=0` until Accept → `create_count=1`; Deny → create stays 0 / late execute fail-closed; busy-Friday conflict with Standup + free-slot suggestions, no write. Fail-closed does not stomp task-13 verification (`e2e04_ready=true`). `INV-APPR-003` intact (no weaken). No code fixes required. **E2E-04 ready** for TASK-14.
 - **Artifacts:** `src/capabilities/calendar/{store,parse,service}.py`, `src/harness/{adapters,virtual_user}.py`, `fixtures/calendar/busy-friday.json`, `scripts/run_test_ci.py`, `artifacts/test/task-13/`
 
 ### TASK-14 — E2E-04 Calendar soft confirm
@@ -384,8 +384,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:40 | TASK-12 | Agent B | composer-2.5 | review | PASS — e2e-03/e2e-01/test-ci/fail-closed exit 0; gate:true artifacts; T2 exit; status → done |
 | 2026-08-08 22:52 | TASK-13 | subagent-A | cursor-grok-4.5-high | implement | Calendar R/W + soft confirm + conflicts |
 | 2026-08-08 22:45 | TASK-13 | Agent A | cursor-grok-4.5-high | implement | Calendar store + soft confirm NL path; status → review |
+| 2026-08-08 22:50 | TASK-13 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01/e2e-03 exit 0; create_count/Deny/conflict spot-checks; E2E-04 ready; status → done |
 
 ---
+
 
 
 ## Rules for sub-agents (mandatory)
@@ -405,5 +407,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-13 review (calendar soft confirm).  
-**Next:** TASK-13 Agent B, then TASK-14 E2E-04.
+**Now:** TASK-14 E2E-04 (calendar soft confirm Accept/Deny).  
+**Next:** TASK-14 Agent A implement.
