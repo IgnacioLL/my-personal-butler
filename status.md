@@ -255,11 +255,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-11, TASK-13
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Booksy-class stub; propose slots; execute only after Accept; calendar writeback; `INV-BOOK-*`. Per `capabilities/bookings.md`.
 - **Acceptance:** Simulated book path + invariants.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Stub Booksy portal (`fixtures/browser/booksy-stub-slots.json`) returns slots; propose 2–3 options behind hard approve with `book_count=0` until Accept; Accept → one `commerce.book` + calendar writeback + WhatsApp `booking_confirm`; Deny leaves execute at 0; forced portal failure → approval/task `failed`, no success confirm/calendar (`INV-BOOK-002`). Unit + integration + `INV-BOOK-001/002` wired into `test:ci`; artifacts under `artifacts/test/task-19/`. **E2E-06 ready** (propose→accept/deny path); **E2E-09 ready** (ignored hard approval expiry → execute still 0). INV-* not weakened.
+- **Artifacts:** `src/capabilities/bookings/{parse,portal,store,service}.py`, `src/invariants/inv_book_00{1,2}.py`, `src/harness/adapters.py`, `src/policy/action_gateway.py`, `src/harness/virtual_user.py`, `fixtures/browser/booksy-stub-slots.json`, `scripts/run_test_ci.py`, `artifacts/test/task-19/`
 
 ### TASK-20 — E2E-06 Booksy propose → approve → book (+ E2E-09 expiry)
 - **Phase:** 5 / T5
@@ -401,6 +401,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:25 | TASK-18 | Agent A | cursor-grok-4.5-high | implement | E2E-02 gate + test:ci; T4 exit ready; status → review |
 | 2026-08-09 00:35 | TASK-18 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-02/test-ci/fail-closed/prior e2e exit 0; ordered touches + allowlist spot-checks; T4 exit; status → done |
 | 2026-08-09 00:40 | TASK-19 | subagent-A | cursor-grok-4.5-high | implement | Bookings stub portal + hard approve + INV-BOOK |
+| 2026-08-09 00:55 | TASK-19 | Agent A | cursor-grok-4.5-high | implement | Stub portal + INV-BOOK-001/002 + writeback; status → review |
 
 ---
 
@@ -423,5 +424,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-18 done; T4 exit PASS.  
-**Next:** Phase 5 bookings (TASK-19).
+**Now:** TASK-19 implement complete → review (Agent B).  
+**Next:** Phase 5 E2E-06/09 (TASK-20) after TASK-19 review PASS.

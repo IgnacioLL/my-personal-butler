@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from capabilities.bookings.parse import EXPECTED_E2E06_UTTERANCE, looks_like_booking
+from capabilities.bookings.service import BookingService, ProposeBookingResult
+from capabilities.bookings.store import BookingStore
 from capabilities.calendar.parse import looks_like_schedule
 from capabilities.calendar.service import CalendarService, ProposeCalendarResult
 from capabilities.calendar.store import CalendarStore
@@ -207,6 +210,8 @@ class VirtualUser:
     todos: TodoService
     calendar: CalendarService
     diet: DietService
+    bookings: BookingService
+    booking_store: BookingStore
     memory: MemoryStore
     android: AndroidProjectionApi
     android_inbox: AndroidApprovalInboxApi
@@ -216,6 +221,7 @@ class VirtualUser:
     last_create: Any = None
     last_soft_confirm: Optional[ProposeResult] = None
     last_calendar_propose: Optional[ProposeCalendarResult] = None
+    last_booking_propose: Optional[ProposeBookingResult] = None
     last_plan_meals: Optional[PlanMealsResult] = None
     last_accept: Optional[AcceptResult] = None
     last_deny: Optional[ApprovalProjection] = None
@@ -282,6 +288,17 @@ class VirtualUser:
             timezone=tz_name,
             recipient=owner,
         )
+        booking_store = BookingStore()
+        bookings = BookingService(
+            clock=clock,
+            catcher=catcher,
+            gateway=gateway,
+            calendar_store=calendar_store,
+            store=booking_store,
+            timezone=tz_name,
+            recipient=owner,
+            portal_fixture=repo / "fixtures" / "browser" / "booksy-stub-slots.json",
+        )
         android = AndroidProjectionApi(
             store=todo_store,
             clock=clock,
@@ -303,6 +320,8 @@ class VirtualUser:
             todos=todos,
             calendar=calendar,
             diet=diet,
+            bookings=bookings,
+            booking_store=booking_store,
             memory=memory,
             android=android,
             android_inbox=android_inbox,
@@ -407,6 +426,46 @@ class VirtualUser:
             transport._send_outbound(
                 decision.normalized_sender or msg.sender,
                 f"Could not create todo: {created.reason}",
+                kind="clarification",
+            )
+            return tools
+
+        if looks_like_booking(body):
+            # Hard approve — never book until Accept (INV-BOOK-001).
+            if tier_for("book") != ApprovalTier.HARD_APPROVE:
+                transport._record_tool("agent.clarify")
+                transport._send_outbound(
+                    decision.normalized_sender or msg.sender,
+                    "Booking is not Hard approve — refusing.",
+                    kind="clarification",
+                )
+                return ["agent.clarify"]
+
+            transport._record_tool("book_propose")
+            proposed = self.bookings.propose_from_utterance(
+                body,
+                timezone=self.timezone,
+                recipient=self.owner,
+                source_channel="whatsapp",
+            )
+            self.last_booking_propose = proposed
+            tools = ["book_propose"]
+            if proposed.ok and proposed.approval_id:
+                transport.counters.outbound_sends += 1
+                if msg.media_type == "audio":
+                    spoken = transport.pipeline.maybe_tts_reply(
+                        proposed.confirm_body, inbound_was_audio=True
+                    )
+                    if spoken:
+                        transport.counters.tts_speaks += 1
+                        transport.last_tts_spoken = True
+                return tools
+
+            transport._record_tool("agent.clarify")
+            tools.append("agent.clarify")
+            transport._send_outbound(
+                decision.normalized_sender or msg.sender,
+                f"Could not propose booking: {proposed.reason}",
                 kind="clarification",
             )
             return tools
@@ -532,6 +591,7 @@ class VirtualUser:
     def deny_approval(self, approval_id: str) -> ApprovalProjection:
         """Virtual User taps Deny on Android — adapters must not run."""
         self.last_deny = self.android_inbox.deny(approval_id)
+        self.bookings.mark_denied_for_approval(approval_id)
         return self.last_deny
 
     def edit_approval(
@@ -602,6 +662,20 @@ class VirtualUser:
     def calendar_create_count(self) -> int:
         return self.gateway.calendar.create_count
 
+    def book_count(self) -> int:
+        return self.gateway.commerce.book_count
+
+    def book_from_utterance(self, utterance: str) -> ProposeBookingResult:
+        """NL path for E2E-06: Book … → pending hard approve (book_count=0)."""
+        result = self.bookings.propose_from_utterance(
+            utterance,
+            timezone=self.timezone,
+            recipient=self.owner,
+            source_channel="whatsapp",
+        )
+        self.last_booking_propose = result
+        return result
+
     def todos_list(self) -> list[Any]:
         return list(self.todo_store.list_all())
 
@@ -616,6 +690,8 @@ class VirtualUser:
                 "todo_dedup",
                 "calendar_propose",
                 "diet_plan",
+                "booking_propose",
+                "booking_confirm",
             }
         ]
 
@@ -633,6 +709,11 @@ class VirtualUser:
                 "events": list(self.gateway.calendar.events),
                 "store": self.calendar_store.to_dict(),
             },
+            "bookings": {
+                "book_count": self.gateway.commerce.book_count,
+                "book_attempt_count": self.gateway.commerce.book_attempt_count,
+                "tasks": self.booking_store.to_dict(),
+            },
             "outbound": self.catcher.to_list(),
             "approvals_pending": [a.id for a in self.pending_approvals()],
             "hard_approvals": [a.id for a in self.hard_approval_items()],
@@ -641,6 +722,16 @@ class VirtualUser:
             "last_meal_plan": (
                 self.last_plan_meals.plan.to_dict()
                 if self.last_plan_meals and self.last_plan_meals.plan
+                else None
+            ),
+            "last_booking": (
+                {
+                    "approval_id": self.last_booking_propose.approval_id,
+                    "task_id": self.last_booking_propose.task_id,
+                    "options": len(self.last_booking_propose.options),
+                    "reason": self.last_booking_propose.reason,
+                }
+                if self.last_booking_propose
                 else None
             ),
         }

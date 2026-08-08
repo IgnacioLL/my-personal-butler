@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from capabilities.reminders.store import ReminderKind, ReminderStore
 from capabilities.todos.store import TodoSource, TodoStore
+from capabilities.bookings.store import BookingStore
 from harness.adapters import (
     StubCalendarAdapter,
     StubCommerceAdapter,
@@ -20,6 +21,7 @@ from harness.adapters import (
     StubSelfModAdapter,
 )
 from harness.clock import FakeClock
+from harness.outbound import OutboundMessageCatcher
 from policy.approvals import (
     HARD_ACTION_TYPES,
     ApprovalError,
@@ -66,6 +68,8 @@ class ActionGateway:
     selfmod: StubSelfModAdapter = field(default_factory=StubSelfModAdapter)
     reminders: ReminderStore | None = None
     todos: TodoStore | None = None
+    bookings: BookingStore | None = None
+    outbound: OutboundMessageCatcher | None = None
     cron: StubCronEmitter = field(init=False)
     execute_attempts: list[dict[str, Any]] = field(default_factory=list)
 
@@ -77,6 +81,17 @@ class ActionGateway:
             self.reminders = ReminderStore()
         if self.todos is None:
             self.todos = TodoStore()
+
+    def attach_bookings(
+        self,
+        store: BookingStore,
+        *,
+        outbound: OutboundMessageCatcher | None = None,
+    ) -> None:
+        """Wire booking task store + optional WhatsApp catcher for writeback/confirm."""
+        self.bookings = store
+        if outbound is not None:
+            self.outbound = outbound
 
     # --- Kill switches -------------------------------------------------
 
@@ -219,6 +234,9 @@ class ActionGateway:
                 audit_id=audit.id,
             )
         except Exception as exc:  # noqa: BLE001
+            # INV-BOOK-002: failed book must not leave user-facing success.
+            if item.action_type == "book":
+                self._mark_booking_failed(item.payload, str(exc))
             self.approvals.mark_failed(approval_id, str(exc))
             self.audit.record(
                 item.action_type,
@@ -271,7 +289,7 @@ class ActionGateway:
         if action_type == "buy":
             return self.commerce.buy(payload)
         if action_type == "book":
-            return self.commerce.book(payload)
+            return self._execute_book(payload)
         if action_type == "self_mod_apply":
             return self.selfmod.apply(payload)
         if action_type == "policy_change":
@@ -302,6 +320,99 @@ class ActionGateway:
         }:
             return {"stub": True, "action_type": action_type, "payload": payload}
         raise ApprovalError("unknown_adapter", f"no adapter for {action_type!r}")
+
+    def _resolve_book_slot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Resolve start/end from chosen_slot_index + options when present."""
+        resolved = dict(payload)
+        options = list(payload.get("options") or [])
+        if options:
+            idx = int(payload.get("chosen_slot_index") or 0)
+            idx = max(0, min(idx, len(options) - 1))
+            chosen = dict(options[idx])
+            resolved["chosen_slot_index"] = idx
+            resolved["start"] = chosen.get("start") or payload.get("start")
+            resolved["end"] = chosen.get("end") or payload.get("end")
+            resolved["slot_id"] = chosen.get("id") or payload.get("slot_id")
+            if chosen.get("stylist"):
+                resolved.setdefault("stylist", chosen["stylist"])
+        return resolved
+
+    def _execute_book(self, payload: dict[str, Any]) -> Any:
+        """Book after Accept: portal execute + calendar writeback + WhatsApp confirm.
+
+        Failure path raises before writeback/confirm so INV-BOOK-002 holds.
+        """
+        resolved = self._resolve_book_slot(payload)
+        start = resolved.get("start")
+        end = resolved.get("end")
+        if not start or not end:
+            raise ApprovalError("invalid_payload", "book requires start and end")
+
+        # Commerce book first — must succeed before any success side effects.
+        confirmation = self.commerce.book(resolved)
+
+        title = str(
+            resolved.get("calendar_title")
+            or f"{resolved.get('service', 'booking')} @ {resolved.get('shop', 'shop')}"
+        )
+        event_payload: dict[str, Any] = {
+            "title": title,
+            "start": start,
+            "end": end,
+            "timezone": resolved.get("timezone") or "UTC",
+            "location": str(resolved.get("shop") or ""),
+            "meta": {
+                "booking_id": confirmation.get("booking_id"),
+                "source": "booksy_stub",
+                "slot_id": resolved.get("slot_id"),
+                "booking_task_id": resolved.get("booking_task_id"),
+            },
+        }
+        cal_event = self.calendar.create(event_payload)
+        confirmation["calendar_event"] = cal_event
+
+        task_id = resolved.get("booking_task_id")
+        if self.bookings is not None and task_id:
+            self.bookings.mark_booked(
+                str(task_id),
+                booking_id=str(confirmation.get("booking_id")),
+                calendar_event_id=str(cal_event.get("id") or ""),
+                at=self.clock.now(),
+            )
+
+        if self.outbound is not None:
+            when = datetime.fromisoformat(str(start))
+            end_dt = datetime.fromisoformat(str(end))
+            price = resolved.get("estimated_price")
+            currency = resolved.get("currency") or ""
+            price_bit = f" (~{price:g} {currency})" if price is not None else ""
+            body = (
+                f"Booked: {title} on {when.strftime('%A %Y-%m-%d %H:%M')}–"
+                f"{end_dt.strftime('%H:%M')}{price_bit}. "
+                f"Confirmation {confirmation.get('booking_id')}."
+            )
+            self.outbound.send(
+                "whatsapp",
+                str(resolved.get("recipient") or "owner"),
+                body,
+                ts=self.clock.now(),
+                kind="booking_confirm",
+                approval_id=None,
+                booking_id=confirmation.get("booking_id"),
+                booking_task_id=task_id,
+                calendar_event_id=cal_event.get("id"),
+            )
+
+        return confirmation
+
+    def _mark_booking_failed(self, payload: dict[str, Any], error: str) -> None:
+        task_id = (payload or {}).get("booking_task_id")
+        if self.bookings is None or not task_id:
+            return
+        try:
+            self.bookings.mark_failed(str(task_id), error, at=self.clock.now())
+        except KeyError:
+            return
 
     def _parse_due(self, payload: dict[str, Any], *, action: str) -> datetime:
         due_raw = payload.get("due_at")

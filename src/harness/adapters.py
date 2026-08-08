@@ -69,14 +69,22 @@ class StubCalendarAdapter:
         self.cancel_count = 0
 
 
+class BookingAdapterError(RuntimeError):
+    """Raised when stub booking execute fails (slot gone / portal error)."""
+
+
 @dataclass
 class StubCommerceAdapter:
     """Buy / book execute counters — must stay 0 until Accept."""
 
     buy_count: int = 0
     book_count: int = 0
+    book_attempt_count: int = 0
     buys: list[dict[str, Any]] = field(default_factory=list)
     books: list[dict[str, Any]] = field(default_factory=list)
+    book_failures: list[dict[str, Any]] = field(default_factory=list)
+    fail_next_book: bool = False
+    fail_book_message: str = "slot_unavailable"
 
     def buy(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.buy_count += 1
@@ -85,6 +93,19 @@ class StubCommerceAdapter:
         return receipt
 
     def book(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Execute reservation. INV-BOOK-001: only called after Accept.
+
+        INV-BOOK-002: on failure raises — caller must not mark user-facing success.
+        """
+        self.book_attempt_count += 1
+        force_fail = bool(payload.get("force_fail")) or self.fail_next_book
+        if force_fail:
+            self.fail_next_book = False
+            message = str(
+                payload.get("fail_reason") or self.fail_book_message or "booking_failed"
+            )
+            self.book_failures.append({"reason": message, "payload": dict(payload)})
+            raise BookingAdapterError(message)
         self.book_count += 1
         confirmation = {"booking_id": f"book-{self.book_count}", **payload}
         self.books.append(confirmation)
@@ -93,8 +114,12 @@ class StubCommerceAdapter:
     def reset(self) -> None:
         self.buy_count = 0
         self.book_count = 0
+        self.book_attempt_count = 0
         self.buys.clear()
         self.books.clear()
+        self.book_failures.clear()
+        self.fail_next_book = False
+        self.fail_book_message = "slot_unavailable"
 
 
 @dataclass

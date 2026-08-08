@@ -1,0 +1,42 @@
+{
+  "shop": "Main St Barber",
+  "shop_url": "https://stub.booksy.test/main-st-barber",
+  "service": "haircut",
+  "stylist": "Jordan",
+  "duration_minutes": 45,
+  "estimated_price": 28.0,
+  "currency": "EUR",
+  "cancellation_policy": "Free cancel up to 4 hours before; late cancel may charge 50%.",
+  "slots": [
+    {
+      "id": "slot-sat-1000",
+      "start": "2026-01-10T10:00:00+01:00",
+      "end": "2026-01-10T10:45:00+01:00",
+      "period": "morning"
+    },
+    {
+      "id": "slot-mon-1400",
+      "start": "2026-01-12T14:00:00+01:00",
+      "end": "2026-01-12T14:45:00+01:00",
+      "period": "afternoon"
+    },
+    {
+      "id": "slot-tue-1500",
+      "start": "2026-01-13T15:00:00+01:00",
+      "end": "2026-01-13T15:45:00+01:00",
+      "period": "afternoon"
+    },
+    {
+      "id": "slot-wed-1600",
+      "start": "2026-01-14T16:00:00+01:00",
+      "end": "2026-01-14T16:45:00+01:00",
+      "period": "afternoon"
+    },
+    {
+      "id": "slot-thu-1100",
+      "start": "2026-01-15T11:00:00+01:00",
+      "end": "2026-01-15T11:45:00+01:00",
+      "period": "morning"
+    }
+  ]
+}

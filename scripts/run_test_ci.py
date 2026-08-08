@@ -31,6 +31,7 @@ from harness.outbound import OutboundMessageCatcher  # noqa: E402
 from harness.virtual_user import (  # noqa: E402
     EXPECTED_E2E04_UTTERANCE,
     EXPECTED_E2E05_UTTERANCE,
+    EXPECTED_E2E06_UTTERANCE,
     VirtualUser,
     run_e2e_01,
     run_e2e_02,
@@ -70,6 +71,10 @@ from capabilities.reminders.store import (  # noqa: E402
 from capabilities.calendar.parse import looks_like_schedule, parse_schedule  # noqa: E402
 from capabilities.calendar.service import CalendarService  # noqa: E402
 from capabilities.calendar.store import CalendarStore  # noqa: E402
+from capabilities.bookings.parse import looks_like_booking, parse_booking  # noqa: E402
+from capabilities.bookings.portal import StubBooksyPortal  # noqa: E402
+from capabilities.bookings.service import BookingService  # noqa: E402
+from capabilities.bookings.store import BookingStatus, BookingStore  # noqa: E402
 from capabilities.diet.constraints import banned_terms, check_meal_plan, text_violations  # noqa: E402
 from capabilities.diet.parse import looks_like_meal_plan, parse_meal_plan_request  # noqa: E402
 from capabilities.diet.planner import build_meal_plan, schedule_hints  # noqa: E402
@@ -275,6 +280,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_android_approval_unit_checks())
     checks.extend(_run_calendar_unit_checks(ROOT))
     checks.extend(_run_diet_unit_checks(ROOT))
+    checks.extend(_run_booking_unit_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -533,6 +539,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_android_approval_integration_checks(ROOT))
     checks.extend(_run_calendar_integration_checks(ROOT))
     checks.extend(_run_diet_integration_checks(ROOT))
+    checks.extend(_run_booking_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -2063,6 +2070,335 @@ def _run_diet_integration_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
+def _run_booking_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Stub portal slots, NL parse, hard-approve tier."""
+    checks: list[dict[str, Any]] = []
+    tz = ZoneInfo("Europe/Madrid")
+    monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+
+    parse_ok = looks_like_booking(EXPECTED_E2E06_UTTERANCE)
+    parsed = parse_booking(EXPECTED_E2E06_UTTERANCE, now=monday, timezone="Europe/Madrid")
+    parse_detail_ok = (
+        parse_ok
+        and parsed.service == "haircut"
+        and parsed.period == "afternoon"
+        and parsed.window_start.isoformat().startswith("2026-01-12")
+    )
+    checks.append(
+        {
+            "id": "unit.booking.parse_e2e06_utterance",
+            "result": "PASS" if parse_detail_ok else "FAIL",
+            "detail": (
+                f"service={parsed.service} period={parsed.period} "
+                f"window_start={parsed.window_start.isoformat()}"
+            ),
+        }
+    )
+
+    portal = StubBooksyPortal.from_fixture(
+        root / "fixtures" / "browser" / "booksy-stub-slots.json"
+    )
+    slots = portal.list_slots(
+        window_start=parsed.window_start,
+        window_end=parsed.window_end,
+        period=parsed.period,
+        limit=3,
+    )
+    portal_ok = (
+        portal.shop == "Main St Barber"
+        and 2 <= len(slots) <= 3
+        and all(s.period == "afternoon" for s in slots)
+        and portal.list_count == 1
+    )
+    checks.append(
+        {
+            "id": "unit.booking.stub_portal_slots",
+            "result": "PASS" if portal_ok else "FAIL",
+            "detail": f"shop={portal.shop} slots={len(slots)} list_count={portal.list_count}",
+        }
+    )
+
+    tier_ok = tier_for("book") == ApprovalTier.HARD_APPROVE
+    checks.append(
+        {
+            "id": "unit.booking.hard_approve_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": f"tier={tier_for('book').value}",
+        }
+    )
+
+    intent_ok = looks_like_booking("Book a haircut next week afternoon.") and not looks_like_booking(
+        "Schedule focus block Friday 09:00–11:00."
+    )
+    checks.append(
+        {
+            "id": "unit.booking.intent_detection",
+            "result": "PASS" if intent_ok else "FAIL",
+            "detail": f"book={looks_like_booking(EXPECTED_E2E06_UTTERANCE)}",
+        }
+    )
+
+    return checks
+
+
+def _run_booking_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Propose → book_count=0; Accept → book+calendar+WhatsApp; Deny stays 0."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    tz = ZoneInfo("Europe/Madrid")
+    clock = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher = OutboundMessageCatcher()
+    cal = CalendarStore()
+    gw = ActionGateway(clock=clock)
+    svc = BookingService(
+        clock=clock,
+        catcher=catcher,
+        gateway=gw,
+        calendar_store=cal,
+        timezone="Europe/Madrid",
+        recipient=owner,
+        portal_fixture=root / "fixtures" / "browser" / "booksy-stub-slots.json",
+    )
+
+    proposed = svc.propose_from_utterance(EXPECTED_E2E06_UTTERANCE)
+    pending = gw.approvals.list(status=ApprovalStatus.PENDING)
+    propose_ok = (
+        proposed.ok
+        and proposed.approval_id is not None
+        and proposed.tier == ApprovalTier.HARD_APPROVE.value
+        and not proposed.executed
+        and gw.commerce.book_count == 0
+        and 2 <= len(proposed.options) <= 3
+        and len(pending) == 1
+        and catcher.count() >= 1
+        and catcher.messages[0].meta.get("kind") == "booking_propose"
+        and proposed.task_id is not None
+    )
+    checks.append(
+        {
+            "id": "integration.booking.nl_propose_hard_approve",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"ok={proposed.ok} approval={proposed.approval_id} "
+                f"book={gw.commerce.book_count} options={len(proposed.options)} "
+                f"reason={proposed.reason}"
+            ),
+        }
+    )
+
+    inbox = AndroidApprovalInboxApi(gw)
+    create_before = gw.calendar.create_count
+    accepted = inbox.accept(proposed.approval_id) if proposed.approval_id else None
+    confirms = [m for m in catcher.messages if m.meta.get("kind") == "booking_confirm"]
+    task = svc.store.get(proposed.task_id) if proposed.task_id else None
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and gw.commerce.book_count == 1
+        and gw.calendar.create_count == create_before + 1
+        and len(confirms) == 1
+        and task is not None
+        and task.is_success
+        and task.status == BookingStatus.BOOKED
+        and len(cal.list_all()) == 1
+    )
+    checks.append(
+        {
+            "id": "integration.booking.accept_books_once_writeback",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} book={gw.commerce.book_count} "
+                f"calendar={gw.calendar.create_count} confirms={len(confirms)} "
+                f"task={task.status.value if task else None}"
+            ),
+        }
+    )
+
+    # Deny path.
+    clock2 = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher2 = OutboundMessageCatcher()
+    cal2 = CalendarStore()
+    gw2 = ActionGateway(clock=clock2)
+    svc2 = BookingService(
+        clock=clock2,
+        catcher=catcher2,
+        gateway=gw2,
+        calendar_store=cal2,
+        timezone="Europe/Madrid",
+        recipient=owner,
+        portal_fixture=root / "fixtures" / "browser" / "booksy-stub-slots.json",
+    )
+    denied_prop = svc2.propose_from_utterance(EXPECTED_E2E06_UTTERANCE)
+    inbox2 = AndroidApprovalInboxApi(gw2)
+    denied = inbox2.deny(denied_prop.approval_id) if denied_prop.approval_id else None
+    if denied_prop.approval_id:
+        svc2.mark_denied_for_approval(denied_prop.approval_id)
+    late = gw2.execute(denied_prop.approval_id) if denied_prop.approval_id else None
+    deny_task = svc2.store.get(denied_prop.task_id) if denied_prop.task_id else None
+    deny_ok = (
+        denied_prop.ok
+        and denied is not None
+        and denied.status == ApprovalStatus.DENIED.value
+        and gw2.commerce.book_count == 0
+        and gw2.calendar.create_count == 0
+        and late is not None
+        and (not late.ok)
+        and deny_task is not None
+        and deny_task.status == BookingStatus.DENIED
+        and not deny_task.is_success
+    )
+    checks.append(
+        {
+            "id": "integration.booking.deny_books_nothing",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"deny={denied.status if denied else None} book={gw2.commerce.book_count} "
+                f"late={getattr(late, 'reason', None)} "
+                f"task={deny_task.status.value if deny_task else None}"
+            ),
+        }
+    )
+
+    # Failed booking cannot mark success (INV-BOOK-002 integration mirror).
+    clock3 = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher3 = OutboundMessageCatcher()
+    gw3 = ActionGateway(clock=clock3)
+    gw3.commerce.fail_next_book = True
+    svc3 = BookingService(
+        clock=clock3,
+        catcher=catcher3,
+        gateway=gw3,
+        timezone="Europe/Madrid",
+        recipient=owner,
+        portal_fixture=root / "fixtures" / "browser" / "booksy-stub-slots.json",
+    )
+    fail_prop = svc3.propose_from_utterance(EXPECTED_E2E06_UTTERANCE)
+    fail_accept = (
+        AndroidApprovalInboxApi(gw3).accept(fail_prop.approval_id)
+        if fail_prop.approval_id
+        else None
+    )
+    fail_task = svc3.store.get(fail_prop.task_id) if fail_prop.task_id else None
+    fail_confirms = [
+        m for m in catcher3.messages if m.meta.get("kind") == "booking_confirm"
+    ]
+    fail_ok = (
+        fail_prop.ok
+        and fail_accept is not None
+        and (not fail_accept.ok)
+        and gw3.commerce.book_count == 0
+        and gw3.calendar.create_count == 0
+        and len(fail_confirms) == 0
+        and fail_task is not None
+        and fail_task.status == BookingStatus.FAILED
+        and not fail_task.is_success
+    )
+    checks.append(
+        {
+            "id": "integration.booking.failed_not_success",
+            "result": "PASS" if fail_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(fail_accept, 'ok', None)} "
+                f"book={gw3.commerce.book_count} calendar={gw3.calendar.create_count} "
+                f"task={fail_task.status.value if fail_task else None}"
+            ),
+        }
+    )
+
+    # Virtual User WhatsApp NL → pending hard approve (E2E-06 readiness).
+    vu = VirtualUser.bootstrap(root=root)
+    turn = vu.inject_text(EXPECTED_E2E06_UTTERANCE)
+    vu_ok = (
+        turn.allowed
+        and "book_propose" in turn.tool_calls
+        and vu.book_count() == 0
+        and len(vu.pending_approvals()) == 1
+        and vu.last_booking_propose is not None
+        and vu.last_booking_propose.ok
+        and 2 <= len(vu.last_booking_propose.options) <= 3
+    )
+    checks.append(
+        {
+            "id": "integration.booking.virtual_user_nl_path",
+            "result": "PASS" if vu_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} book={vu.book_count()} "
+                f"pending={len(vu.pending_approvals())} "
+                f"options={len(vu.last_booking_propose.options) if vu.last_booking_propose else 0}"
+            ),
+        }
+    )
+
+    appr_id = vu.last_booking_propose.approval_id if vu.last_booking_propose else None
+    vu_accept = vu.accept_approval(appr_id) if appr_id else None
+    vu_confirms = [
+        m for m in vu.catcher.messages if m.meta.get("kind") == "booking_confirm"
+    ]
+    vu_accept_ok = (
+        vu_accept is not None
+        and vu_accept.ok
+        and vu.book_count() == 1
+        and vu.calendar_create_count() == 1
+        and len(vu_confirms) == 1
+    )
+    checks.append(
+        {
+            "id": "integration.booking.virtual_user_accept",
+            "result": "PASS" if vu_accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(vu_accept, 'ok', None)} book={vu.book_count()} "
+                f"calendar={vu.calendar_create_count()} confirms={len(vu_confirms)}"
+            ),
+        }
+    )
+
+    # E2E-09 readiness: ignored hard approval expires → execute still 0.
+    vu_exp = VirtualUser.bootstrap(root=root)
+    exp_prop = vu_exp.book_from_utterance(EXPECTED_E2E06_UTTERANCE)
+    book_before_exp = vu_exp.book_count()
+    late_accept_ok = None
+    late_exec = None
+    expired_item = None
+    item = None
+    if exp_prop.approval_id:
+        item = vu_exp.gateway.approvals.get(exp_prop.approval_id)
+        # Advance past hard default expiry (4h).
+        vu_exp.advance(timedelta(hours=5))
+        vu_exp.gateway.approvals.expire_due()
+        expired_item = vu_exp.gateway.approvals.get(exp_prop.approval_id)
+        try:
+            late_accept = vu_exp.accept_approval(exp_prop.approval_id)
+            late_accept_ok = late_accept.ok
+        except ApprovalError:
+            late_accept_ok = False
+        late_exec = vu_exp.gateway.execute(exp_prop.approval_id)
+    exp_ok = (
+        exp_prop.ok
+        and book_before_exp == 0
+        and vu_exp.book_count() == 0
+        and expired_item is not None
+        and expired_item.status == ApprovalStatus.EXPIRED
+        and late_accept_ok is False
+        and late_exec is not None
+        and (not late_exec.ok)
+    )
+    checks.append(
+        {
+            "id": "integration.booking.expiry_e2e09_ready",
+            "result": "PASS" if exp_ok else "FAIL",
+            "detail": (
+                f"status={expired_item.status.value if expired_item else None} "
+                f"book={vu_exp.book_count()} "
+                f"late_accept_ok={late_accept_ok} "
+                f"late_exec={getattr(late_exec, 'reason', None)} "
+                f"was_pending={item.status.value if item else None}"
+            ),
+        }
+    )
+
+    return checks
+
+
 def _run_android_approval_unit_checks() -> list[dict[str, Any]]:
     """Android approval inbox API: list/Accept/Deny/Edit + soft calendar gate."""
     checks: list[dict[str, Any]] = []
@@ -2738,6 +3074,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-15/",
                     "artifacts/test/task-16/",
                     "artifacts/test/task-17/",
+                    "artifacts/test/task-19/",
                 ],
             },
         },
@@ -2749,12 +3086,15 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "WhatsApp ingress + memory R/W + transcription + reminders/habits + "
             "E2E-01 voice reminder + E2E-02 habit escalation ladder (T4) + "
             "E2E-03 todo sync + E2E-04 calendar soft confirm + E2E-05 diet → "
-            "groceries gates + TASK-17 outbound voice calls (INV-APPR-005): "
+            "groceries gates + TASK-17 outbound voice calls (INV-APPR-005) + "
+            "TASK-19 Booksy stub bookings (INV-BOOK-001/002): "
             "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
             "Android projection equality; calendar soft-confirm (INV-APPR-003); "
             "diet plan with banned-ingredient absence + grocery todos; "
             "WhatsApp→Android→call ordered touches; after-call WhatsApp summary; "
-            "call-mode blocks buy/book/self_mod_apply; fail-closed on broken INV"
+            "call-mode blocks buy/book/self_mod_apply; hard-approve book "
+            "book_count=0 until Accept + calendar writeback + WhatsApp confirm; "
+            "failed booking never marks success; fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -2782,6 +3122,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-15/verification.json",
             "artifacts/test/task-16/verification.json",
             "artifacts/test/task-17/verification.json",
+            "artifacts/test/task-19/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -4091,6 +4432,223 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-17/outbound-messages.json",
                         "artifacts/test/task-17/android-notifications.json",
                         "artifacts/test/task-17/escalation-touches.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-19 Booksy stub portal bookings + hard approve + INV-BOOK-*.
+    # Fail-closed must not stomp happy-path task-19 verification.
+    booking_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.booking.")
+    ]
+    booking_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.booking.")
+    ]
+    book_invs = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-BOOK-")
+    ]
+    task19_checks = booking_unit + booking_integration + book_invs
+    task19_pass = (
+        all(c.get("result") == "PASS" for c in task19_checks) if task19_checks else False
+    )
+    if not broken:
+        task19 = ROOT / "artifacts" / "test" / "task-19"
+        task19.mkdir(parents=True, exist_ok=True)
+        tz = ZoneInfo("Europe/Madrid")
+        monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+        demo_clock = FakeClock(start=monday)
+        demo_catcher = OutboundMessageCatcher()
+        demo_cal = CalendarStore()
+        demo_gw = ActionGateway(clock=demo_clock)
+        demo_svc = BookingService(
+            clock=demo_clock,
+            catcher=demo_catcher,
+            gateway=demo_gw,
+            calendar_store=demo_cal,
+            timezone="Europe/Madrid",
+            recipient="+15550001111",
+            portal_fixture=ROOT / "fixtures" / "browser" / "booksy-stub-slots.json",
+        )
+        demo_prop = demo_svc.propose_from_utterance(EXPECTED_E2E06_UTTERANCE)
+        book_before = demo_gw.commerce.book_count
+        demo_inbox = AndroidApprovalInboxApi(demo_gw)
+        demo_accept = (
+            demo_inbox.accept(demo_prop.approval_id) if demo_prop.approval_id else None
+        )
+        demo_confirms = [
+            m for m in demo_catcher.messages if m.meta.get("kind") == "booking_confirm"
+        ]
+        demo_task = (
+            demo_svc.store.get(demo_prop.task_id) if demo_prop.task_id else None
+        )
+
+        # Deny variant artifact evidence.
+        deny_clock = FakeClock(start=monday)
+        deny_catcher = OutboundMessageCatcher()
+        deny_gw = ActionGateway(clock=deny_clock)
+        deny_svc = BookingService(
+            clock=deny_clock,
+            catcher=deny_catcher,
+            gateway=deny_gw,
+            timezone="Europe/Madrid",
+            recipient="+15550001111",
+            portal_fixture=ROOT / "fixtures" / "browser" / "booksy-stub-slots.json",
+        )
+        deny_prop = deny_svc.propose_from_utterance(EXPECTED_E2E06_UTTERANCE)
+        if deny_prop.approval_id:
+            AndroidApprovalInboxApi(deny_gw).deny(deny_prop.approval_id)
+            deny_svc.mark_denied_for_approval(deny_prop.approval_id)
+
+        (task19 / "bookings.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": {
+                        "propose": {
+                            "ok": demo_prop.ok,
+                            "approval_id": demo_prop.approval_id,
+                            "task_id": demo_prop.task_id,
+                            "options": demo_prop.options,
+                            "book_count_at_propose": book_before,
+                        },
+                        "accept_ok": getattr(demo_accept, "ok", None),
+                        "book_count": demo_gw.commerce.book_count,
+                        "calendar_create_count": demo_gw.calendar.create_count,
+                        "task": demo_task.to_dict() if demo_task else None,
+                        "calendar_events": [e.to_dict() for e in demo_cal.list_all()],
+                    },
+                    "deny_path": {
+                        "approval_id": deny_prop.approval_id,
+                        "book_count": deny_gw.commerce.book_count,
+                        "task": (
+                            deny_svc.store.get(deny_prop.task_id).to_dict()
+                            if deny_prop.task_id and deny_svc.store.get(deny_prop.task_id)
+                            else None
+                        ),
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        demo_catcher.write_json(task19 / "outbound-messages.json")
+        (task19 / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "accept": [a.to_dict() for a in demo_gw.approvals.list()],
+                    "deny": [a.to_dict() for a in deny_gw.approvals.list()],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (task19 / "portal-slots.json").write_text(
+            json.dumps(
+                {
+                    "shop": demo_svc.portal.shop_card(),
+                    "proposed_options": demo_prop.options,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        e2e06_ready = (
+            task19_pass
+            and demo_prop.ok
+            and book_before == 0
+            and demo_gw.commerce.book_count == 1
+            and demo_gw.calendar.create_count == 1
+            and len(demo_confirms) == 1
+            and deny_gw.commerce.book_count == 0
+        )
+        e2e09_ready = any(
+            c.get("id") == "integration.booking.expiry_e2e09_ready"
+            and c.get("result") == "PASS"
+            for c in booking_integration
+        )
+        write_report(
+            task19,
+            layer="task-19",
+            result="PASS" if task19_pass else "FAIL",
+            checks=task19_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-06",
+                "e2e06_ready": e2e06_ready,
+                "e2e09_ready": e2e09_ready,
+                "book_count_after_accept": demo_gw.commerce.book_count,
+                "book_count_after_deny": deny_gw.commerce.book_count,
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-19/",
+                },
+            },
+        )
+        (task19 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "TASK-19 Booksy stub portal: propose 2–3 slots behind hard "
+                        "approve (book_count=0); Accept → one book execute + calendar "
+                        "writeback + WhatsApp confirm; Deny leaves execute at 0; "
+                        "INV-BOOK-001/002 green; E2E-06/E2E-09 readiness"
+                    ),
+                    "result": "PASS" if task19_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-06",
+                    "e2e06_ready": e2e06_ready,
+                    "e2e09_ready": e2e09_ready,
+                    "invariants": ["INV-BOOK-001", "INV-BOOK-002"],
+                    "unit_checks": [c.get("id") for c in booking_unit],
+                    "integration_checks": [c.get("id") for c in booking_integration],
+                    "book_count_after_accept": demo_gw.commerce.book_count,
+                    "book_count_after_deny": deny_gw.commerce.book_count,
+                    "calendar_writeback": demo_gw.calendar.create_count == 1,
+                    "whatsapp_confirm": len(demo_confirms) == 1,
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-02",
+                        "make e2e-03",
+                        "make e2e-04",
+                        "make e2e-05",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-19/report.json",
+                        "artifacts/test/task-19/verification.json",
+                        "artifacts/test/task-19/bookings.json",
+                        "artifacts/test/task-19/approvals.json",
+                        "artifacts/test/task-19/outbound-messages.json",
+                        "artifacts/test/task-19/portal-slots.json",
                     ],
                 },
                 indent=2,
