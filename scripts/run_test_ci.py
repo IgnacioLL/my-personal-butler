@@ -1631,8 +1631,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     )
 
     # TASK-07 reminders + habits artifacts.
-    task07 = ROOT / "artifacts" / "test" / "task-07"
-    task07.mkdir(parents=True, exist_ok=True)
+    # Fail-closed (--break-invariant) must not stomp happy-path task-07 evidence:
+    # INV break is expected overall FAIL; reminder checks are independent.
     reminder_unit = [
         c
         for L in layers
@@ -1651,96 +1651,99 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     task07_pass = (
         all(c.get("result") == "PASS" for c in task07_checks) if task07_checks else False
     )
-    # Capture confirm + fire outbound sample for artifact convention (E2E-01 prep).
-    tz = ZoneInfo("Europe/Madrid")
-    monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
-    demo_clock = FakeClock(start=monday)
-    demo_catcher = OutboundMessageCatcher()
-    demo_store = ReminderStore()
-    demo_gw = ActionGateway(clock=demo_clock, reminders=demo_store)
-    demo_svc = ReminderService(
-        store=demo_store,
-        clock=demo_clock,
-        catcher=demo_catcher,
-        gateway=demo_gw,
-        timezone="Europe/Madrid",
-        recipient="+15550001111",
-    )
-    demo = demo_svc.create_from_utterance(
-        "Remind me Sunday at 18:00 to call grandma.",
-        timezone="Europe/Madrid",
-    )
-    if demo.reminder is not None:
-        demo_sched = ReminderScheduler(
-            demo_store,
-            demo_clock,
-            demo_catcher,
-            kill=demo_gw.kill,
-            default_recipient="+15550001111",
+    if not broken:
+        task07 = ROOT / "artifacts" / "test" / "task-07"
+        task07.mkdir(parents=True, exist_ok=True)
+        # Capture confirm + fire outbound sample for artifact convention (E2E-01 prep).
+        tz = ZoneInfo("Europe/Madrid")
+        monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+        demo_clock = FakeClock(start=monday)
+        demo_catcher = OutboundMessageCatcher()
+        demo_store = ReminderStore()
+        demo_gw = ActionGateway(clock=demo_clock, reminders=demo_store)
+        demo_svc = ReminderService(
+            store=demo_store,
+            clock=demo_clock,
+            catcher=demo_catcher,
+            gateway=demo_gw,
+            timezone="Europe/Madrid",
+            recipient="+15550001111",
         )
-        demo_sched.advance(demo.reminder.due_at - demo_clock.now())
-    demo_catcher.write_json(task07 / "outbound-messages.json")
-    (task07 / "reminders.json").write_text(
-        json.dumps(demo_store.to_dict(), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    write_report(
-        task07,
-        layer="task-07",
-        result="PASS"
-        if (overall == "PASS" and task07_pass)
-        else ("FAIL" if not broken else overall),
-        checks=task07_checks or flat_checks,
-        extra={
-            "broken_allow_all": broken,
-            "ci_overall": overall,
-            "e2e_flow": "E2E-01 (voice reminder) — create/fire ready; E2E-02 habit ladder scaffold",
-            "seed_timezone": "Europe/Madrid",
-            "agent_b_rerun": {
-                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
-                "fail_closed_proof": [
-                    "./scripts/test-ci.sh --break-invariant",
-                    "make test-ci-fail-closed",
-                ],
-                "artifacts": "artifacts/test/task-07/",
-            },
-        },
-    )
-    (task07 / "verification.json").write_text(
-        json.dumps(
-            {
-                "claim": (
-                    "One-shot + recurring reminders via FakeClock.advance; "
-                    "outbound confirm/fire captured; habit WhatsApp-first escalation "
-                    "scaffold; reminder_create is Auto (no hard approval); E2E-01 ready"
-                ),
-                "result": "PASS"
-                if (overall == "PASS" and task07_pass)
-                else ("FAIL" if not broken else overall),
+        demo = demo_svc.create_from_utterance(
+            "Remind me Sunday at 18:00 to call grandma.",
+            timezone="Europe/Madrid",
+        )
+        if demo.reminder is not None:
+            demo_sched = ReminderScheduler(
+                demo_store,
+                demo_clock,
+                demo_catcher,
+                kill=demo_gw.kill,
+                default_recipient="+15550001111",
+            )
+            demo_sched.advance(demo.reminder.due_at - demo_clock.now())
+        demo_catcher.write_json(task07 / "outbound-messages.json")
+        (task07 / "reminders.json").write_text(
+            json.dumps(demo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            task07,
+            layer="task-07",
+            result="PASS" if task07_pass else "FAIL",
+            checks=task07_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
                 "ci_overall": overall,
-                "e2e_flow": "E2E-01",
-                "e2e_prep": "E2E-02",
+                "e2e_flow": (
+                    "E2E-01 (voice reminder) — create/fire ready; "
+                    "E2E-02 habit ladder scaffold"
+                ),
                 "seed_timezone": "Europe/Madrid",
-                "unit_checks": [c.get("id") for c in reminder_unit],
-                "integration_checks": [c.get("id") for c in reminder_integration],
-                "commands": [
-                    "./scripts/test-ci.sh",
-                    "make test-ci",
-                    "make test-ci-fail-closed",
-                ],
-                "artifacts": [
-                    "artifacts/test/task-07/report.json",
-                    "artifacts/test/task-07/verification.json",
-                    "artifacts/test/task-07/outbound-messages.json",
-                    "artifacts/test/task-07/reminders.json",
-                ],
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-07/",
+                },
             },
-            indent=2,
-            sort_keys=True,
         )
-        + "\n",
-        encoding="utf-8",
-    )
+        (task07 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "One-shot + recurring reminders via FakeClock.advance; "
+                        "outbound confirm/fire captured; habit WhatsApp-first "
+                        "escalation scaffold; reminder_create is Auto "
+                        "(no hard approval); E2E-01 ready"
+                    ),
+                    "result": "PASS" if task07_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-01",
+                    "e2e_prep": "E2E-02",
+                    "seed_timezone": "Europe/Madrid",
+                    "unit_checks": [c.get("id") for c in reminder_unit],
+                    "integration_checks": [c.get("id") for c in reminder_integration],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-07/report.json",
+                        "artifacts/test/task-07/verification.json",
+                        "artifacts/test/task-07/outbound-messages.json",
+                        "artifacts/test/task-07/reminders.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return 0 if overall == "PASS" else 1
 
 
