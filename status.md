@@ -101,11 +101,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** done
 - **Scope:** Documented/config scaffolding for always-on Gateway per `operations/hosting.md`; backup paths; restart preserves pending approvals (prep for E2E-10). No live VPS required — harness-friendly config.
 - **Acceptance:** Config templates + tests that approval store survives harness restart.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: pending buy approval survives `ActionGateway` reopen + `ApprovalStore.open()` + `GatewayHarness.restart()`; Accept executes once after restart (`buy_count=1`, second execute blocked, status=executed). Config templates (`gateway.harness.json`, `backup.example.json`, hosting section) load; `INV-APPR/KILL/AUDIT/INGRESS/MEM-*` intact. No code fixes required. Ready for TASK-06 / E2E-10 prep.
+- **Artifacts:** `src/policy/approvals.py`, `src/policy/action_gateway.py`, `src/harness/{gateway_profile,gateway_harness}.py`, `config/{gateway.harness.json,backup.example.json,gateway.example.yaml,README.md}`, `scripts/backup-restore-placeholder.sh`, `scripts/run_test_ci.py`, `artifacts/test/task-05/` (runtime; gitignored)
 
 ### TASK-06 — Transcription pipeline (WhatsApp audio → turn)
 - **Phase:** 1 / T1
@@ -360,6 +360,8 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:05 | TASK-04 | Agent A | composer-2.5 | implement | Memory store + INV-MEM-001 + integration; status → review |
 | 2026-08-08 22:06 | TASK-04 | Agent B | composer-2.5 | review | PASS — re-ran test-ci + fail-closed; secrets/fixture/persistence spot-checks; status → done |
 | 2026-08-08 22:08 | TASK-05 | subagent-A | composer-2.5 | implement | Hosting/Gateway config + approval store reboot durability |
+| 2026-08-08 22:06 | TASK-05 | Agent A | composer-2.5 | implement | Durable approvals + E2E-10 prep tests; status → review |
+| 2026-08-08 22:06 | TASK-05 | Agent B | composer-2.5 | review | PASS — re-ran test-ci + fail-closed; restart/accept-once spot-checks; status → done |
 
 ---
 
@@ -380,5 +382,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-05 in_progress (hosting).  
-**Next:** TASK-05 Agent B, then TASK-06 transcription (Grok).
+**Now:** TASK-06 transcription (Grok).  
+**Next:** TASK-06 Agent A implement, then Agent B review.
