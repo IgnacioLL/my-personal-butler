@@ -35,7 +35,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | Fake clock utility | done | `src/harness/clock.py` — `now()` / `advance(duration)` |
 | INV-* runner skeleton | done | `src/harness/inv_runner.py` + `src/invariants/` |
 | Virtual User harness | done | `src/harness/virtual_user.py` — inject audio/text, create reminders, assert state (E2E-01 gate) |
-| Phase exits require matching T* unlock | done | T5 exit ready (TASK-19+20): stub portal + E2E-06 gate + INV-BOOK-* (+ E2E-09) |
+| Phase exits require matching T* unlock | done | **T5 exit PASS** (TASK-19+20): stub portal + E2E-06 gate + INV-BOOK-* (+ E2E-09) |
 
 ---
 
@@ -266,10 +266,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-19
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** E2E-06 accept/deny; E2E-09 ignored approval expiry.
 - **Acceptance:** T5 exit.
-- **Result:** Implement complete (Agent A) — `make e2e-06` / `make e2e-09` wired; E2E-06 gated in `test:ci` (+ E2E-09). Accept path: WhatsApp “Book a haircut next week afternoon.” → 2–3 afternoon slots, `book_count=0` until Accept → one book + calendar writeback + WhatsApp confirm. Deny → `book_count=0` + task `denied`. E2E-09: FakeClock +5h → approval `expired`; late Accept/execute blocked. INV-* not weakened. **T5 exit** (stub portal + E2E-06 + INV-BOOK-*) ready for Agent B.
+- **Result:** PASS (Agent B review) — Re-ran `make e2e-06` exit 0, `make e2e-09` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, sample prior e2e (`e2e-01`/`04`/`05`) exit 0. Spot-checks: Accept → `book_count=1` (second execute blocked); Deny → `book_count=0` + task `denied`; FakeClock +5h → `expired`, late Accept/execute blocked. Fail-closed does not stomp e2e-06/09/task-20 verification. INV-* intact (no weaken). No code fixes required. **T5 exit PASS** — stub portal + E2E-06 + INV-BOOK-* (+ E2E-09).
 - **Artifacts:** `scripts/run_e2e_06.py`, `scripts/run_e2e_09.py`, `src/harness/virtual_user.py` (`run_e2e_06`/`run_e2e_09`), `Makefile` (`e2e-06`/`e2e-09`), `scripts/run_test_ci.py` (gate), `artifacts/test/e2e-06/`, `artifacts/test/e2e-09/`, `artifacts/test/task-20/`
 
 ### TASK-21 — Shopping skill (caps, freeze, dry-run)
@@ -405,6 +405,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 01:10 | TASK-19 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/prior e2e exit 0; deny writeback fix; E2E-06 ready; status → done |
 | 2026-08-09 01:12 | TASK-20 | subagent-A | cursor-grok-4.5-high | implement | E2E-06 + E2E-09 booking journeys |
 | 2026-08-09 01:30 | TASK-20 | Agent A | cursor-grok-4.5-high | implement | E2E-06 gate + E2E-09 expiry; T5 exit ready; status → review |
+| 2026-08-08 23:19 | TASK-20 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-06/09/test-ci/fail-closed/prior e2e exit 0; accept-once/deny-0/expiry spot-checks; T5 exit; status → done |
 
 ---
 
@@ -427,5 +428,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-20 review (Agent B).  
-**Next:** Phase 6 shopping (TASK-21+) after TASK-20 done.
+**Now:** TASK-20 done — **T5 exit PASS**.  
+**Next:** Phase 6 shopping (TASK-21+).
