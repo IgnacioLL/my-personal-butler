@@ -35,7 +35,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | Fake clock utility | done | `src/harness/clock.py` — `now()` / `advance(duration)` |
 | INV-* runner skeleton | done | `src/harness/inv_runner.py` + `src/invariants/` |
 | Virtual User harness | done | `src/harness/virtual_user.py` — inject audio/text, create reminders, assert state (E2E-01 gate) |
-| Phase exits require matching T* unlock | pending | |
+| Phase exits require matching T* unlock | pending | T4 ready (TASK-17+18): mock voice + E2E-02 + INV-APPR-005 — awaiting Agent B |
 
 ---
 
@@ -247,7 +247,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Status:** review
 - **Scope:** WhatsApp → Android → call ordered touches; no buy/book/self-mod on call session.
 - **Acceptance:** T4 exit.
-- **Result:** PASS (Agent A implement) — `make e2e-02` exit 0; Virtual User journey: quiet hours off + high-priority recurring habit; clock advances fire WhatsApp → Android → outbound call; after-call WhatsApp summary queued; mid-call buy/book/self_mod_apply blocked (`call_mode_forbidden_hard_action`); ordered channel touches asserted. Wired into `test:ci` e2e gate layer alongside E2E-01/03/04/05. INV-* intact (no weaken). **T4 exit:** mock voice (TASK-17) + E2E-02 ladder (TASK-18) + `INV-APPR-005` green — Phase 4 / T4 unlock ready pending Agent B review.
+- **Result:** PASS (Agent A implement) — Re-ran `make e2e-02` exit 0, `make e2e-01/03/04/05` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0. Virtual User journey: quiet hours off + high-priority recurring habit; clock advances fire WhatsApp → Android → outbound call; after-call WhatsApp summary queued; mid-call buy/book/self_mod_apply blocked (`call_mode_forbidden_hard_action`); ordered channel touches asserted. Wired into `test:ci` e2e gate layer. INV-* intact (no weaken). **T4 exit:** mock voice (TASK-17) + E2E-02 ladder (TASK-18) + `INV-APPR-005` green — Phase 4 / T4 unlock ready pending Agent B review.
 - **Artifacts:** `scripts/run_e2e_02.py`, `src/harness/virtual_user.py` (`run_e2e_02`), `Makefile` (`e2e-02`), `scripts/run_test_ci.py` (gate), `artifacts/test/e2e-02/`
 
 ### TASK-19 — Bookings skill (stub portal) + hard approve
