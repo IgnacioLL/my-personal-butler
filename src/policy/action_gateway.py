@@ -153,6 +153,24 @@ class ActionGateway:
     def deny(self, approval_id: str) -> Any:
         return self.approvals.deny(approval_id)
 
+    def edit(
+        self,
+        approval_id: str,
+        *,
+        summary: str | None = None,
+        payload: dict[str, Any] | None = None,
+        payload_patch: dict[str, Any] | None = None,
+        estimated_cost: float | None = None,
+    ) -> Any:
+        """Edit pending approval details (same surface Android Edit uses)."""
+        return self.approvals.edit(
+            approval_id,
+            summary=summary,
+            payload=payload,
+            payload_patch=payload_patch,
+            estimated_cost=estimated_cost,
+        )
+
     # --- Execute (gated) -----------------------------------------------
 
     def execute(self, approval_id: str) -> ExecuteResult:

@@ -315,6 +315,40 @@ class ApprovalStore:
         self._maybe_persist()
         return item
 
+    def edit(
+        self,
+        approval_id: str,
+        *,
+        summary: str | None = None,
+        payload: dict[str, Any] | None = None,
+        payload_patch: dict[str, Any] | None = None,
+        estimated_cost: float | None = None,
+    ) -> ApprovalItem:
+        """Edit pending approval details (Android Edit) before Accept/Deny.
+
+        ``payload`` replaces the whole payload; ``payload_patch`` merges into it.
+        Only pending items may be edited — denied/expired/executed stay terminal.
+        """
+        self.expire_due()
+        item = self._require(approval_id)
+        if item.status != ApprovalStatus.PENDING:
+            raise ApprovalError(
+                "invalid_transition",
+                f"cannot edit from status={item.status.value}",
+            )
+        if summary is not None:
+            item.summary = summary
+        if payload is not None:
+            item.payload = dict(payload)
+        if payload_patch is not None:
+            merged = dict(item.payload)
+            merged.update(payload_patch)
+            item.payload = merged
+        if estimated_cost is not None:
+            item.estimated_cost = estimated_cost
+        self._maybe_persist()
+        return item
+
     def mark_executed(self, approval_id: str) -> ApprovalItem:
         item = self._require(approval_id)
         if item.status != ApprovalStatus.ACCEPTED:

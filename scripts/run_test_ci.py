@@ -28,10 +28,16 @@ from harness.gateway_profile import gateway_data_paths, load_gateway_profile  # 
 from harness.ingress_sim import IngressSimulator  # noqa: E402
 from harness.inv_runner import run_all  # noqa: E402
 from harness.outbound import OutboundMessageCatcher  # noqa: E402
-from harness.virtual_user import run_e2e_01, run_e2e_03  # noqa: E402
+from harness.virtual_user import (  # noqa: E402
+    VirtualUser,
+    run_e2e_01,
+    run_e2e_03,
+    run_t2_approval_inbox,
+)
 from harness.whatsapp_transport import MockWhatsAppTransport  # noqa: E402
 from policy.action_gateway import ActionGateway  # noqa: E402
 from policy.approvals import (  # noqa: E402
+    ApprovalError,
     ApprovalStatus,
     ApprovalTier,
     tier_for,
@@ -58,6 +64,7 @@ from capabilities.reminders.store import (  # noqa: E402
 from capabilities.todos.parse import looks_like_todo_add, parse_todo  # noqa: E402
 from capabilities.todos.service import TodoService  # noqa: E402
 from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normalize_title  # noqa: E402
+from channels.android.approvals import AndroidApprovalInboxApi  # noqa: E402
 from channels.android.projection import AndroidProjectionApi  # noqa: E402
 
 
@@ -242,6 +249,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_models_unit_checks(ROOT))
     checks.extend(_run_reminder_unit_checks())
     checks.extend(_run_todo_unit_checks())
+    checks.extend(_run_android_approval_unit_checks())
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -409,6 +417,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_models_integration_checks(ROOT))
     checks.extend(_run_reminder_integration_checks(ROOT))
     checks.extend(_run_todo_integration_checks(ROOT))
+    checks.extend(_run_android_approval_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -1148,6 +1157,175 @@ def _run_todo_unit_checks() -> list[dict[str, Any]]:
     return checks
 
 
+def _run_android_approval_unit_checks() -> list[dict[str, Any]]:
+    """Android approval inbox API: list/Accept/Deny/Edit + soft calendar gate."""
+    checks: list[dict[str, Any]] = []
+    clock = FakeClock()
+    gw = ActionGateway(clock=clock)
+    inbox = AndroidApprovalInboxApi(gw)
+
+    soft = gw.propose(
+        "calendar_create",
+        "Focus block",
+        {
+            "title": "Focus block",
+            "start": "2026-01-09T09:00:00+01:00",
+            "end": "2026-01-09T11:00:00+01:00",
+        },
+    )
+    pending = inbox.list_pending()
+    list_ok = (
+        soft.ok
+        and soft.approval_id is not None
+        and soft.tier == ApprovalTier.SOFT_CONFIRM.value
+        and not soft.executed
+        and gw.calendar.create_count == 0
+        and len(pending) == 1
+        and pending[0].id == soft.approval_id
+        and pending[0].action_type == "calendar_create"
+    )
+    checks.append(
+        {
+            "id": "unit.android_approval.list_pending_soft",
+            "result": "PASS" if list_ok else "FAIL",
+            "detail": (
+                f"tier={soft.tier} pending={len(pending)} "
+                f"create={gw.calendar.create_count}"
+            ),
+        }
+    )
+
+    assert soft.approval_id is not None
+    edited = inbox.edit(
+        soft.approval_id,
+        summary="Focus block (edited)",
+        payload_patch={"title": "Focus block (edited)"},
+    )
+    edit_ok = (
+        edited.summary == "Focus block (edited)"
+        and edited.payload.get("title") == "Focus block (edited)"
+        and edited.status == ApprovalStatus.PENDING.value
+        and gw.calendar.create_count == 0
+    )
+    checks.append(
+        {
+            "id": "unit.android_approval.edit_pending",
+            "result": "PASS" if edit_ok else "FAIL",
+            "detail": f"summary={edited.summary!r} create={gw.calendar.create_count}",
+        }
+    )
+
+    accepted = inbox.accept(soft.approval_id)
+    accept_ok = (
+        accepted.ok
+        and accepted.approval.status == ApprovalStatus.EXECUTED.value
+        and gw.calendar.create_count == 1
+        and len(inbox.list_pending()) == 0
+    )
+    checks.append(
+        {
+            "id": "unit.android_approval.accept_executes",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"ok={accepted.ok} status={accepted.approval.status} "
+                f"create={gw.calendar.create_count}"
+            ),
+        }
+    )
+
+    deny_prop = gw.propose(
+        "calendar_create",
+        "Dentist",
+        {
+            "title": "Dentist",
+            "start": "2026-01-10T15:00:00+01:00",
+            "end": "2026-01-10T16:00:00+01:00",
+        },
+    )
+    assert deny_prop.approval_id is not None
+    denied = inbox.deny(deny_prop.approval_id)
+    late = gw.execute(deny_prop.approval_id)
+    deny_ok = (
+        denied.status == ApprovalStatus.DENIED.value
+        and gw.calendar.create_count == 1
+        and (not late.ok)
+        and gw.calendar.create_count == 1
+    )
+    checks.append(
+        {
+            "id": "unit.android_approval.deny_blocks_execute",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"status={denied.status} late={late.reason} create={gw.calendar.create_count}"
+            ),
+        }
+    )
+
+    # Edit after deny must fail closed.
+    edit_blocked = False
+    try:
+        inbox.edit(deny_prop.approval_id, summary="nope")
+    except ApprovalError:
+        edit_blocked = True
+    checks.append(
+        {
+            "id": "unit.android_approval.edit_terminal_blocked",
+            "result": "PASS" if edit_blocked else "FAIL",
+            "detail": f"edit_blocked={edit_blocked}",
+        }
+    )
+
+    return checks
+
+
+def _run_android_approval_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Virtual User alone Accept/Deny via Android API; soft-confirm calendar hooks."""
+    checks: list[dict[str, Any]] = []
+
+    t2 = run_t2_approval_inbox(
+        root=root,
+        artifacts_dir=root / "artifacts" / "test" / "task-11",
+        write_artifacts=False,
+    )
+    for check in t2.checks:
+        checks.append(
+            {
+                "id": f"integration.android_approval.{check['id'].removeprefix('t2.')}",
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": check.get("gate", True),
+            }
+        )
+
+    # Explicit E2E-04 hook: pending soft confirm leaves adapter create at 0.
+    vu = VirtualUser.bootstrap(root=root)
+    prop = vu.propose_soft_calendar(
+        title="Focus block",
+        start="2026-01-09T09:00:00+01:00",
+        end="2026-01-09T11:00:00+01:00",
+        source_utterance="Schedule focus block Friday 09:00–11:00.",
+    )
+    hook_ok = (
+        prop.ok
+        and prop.approval_id is not None
+        and vu.calendar_create_count() == 0
+        and len(vu.list_android_approvals()) == 1
+        and vu.android_inbox.get(prop.approval_id) is not None
+    )
+    checks.append(
+        {
+            "id": "integration.android_approval.e2e04_soft_confirm_hook",
+            "result": "PASS" if hook_ok else "FAIL",
+            "detail": (
+                f"approval_id={prop.approval_id} create={vu.calendar_create_count()} "
+                f"pending={len(vu.list_android_approvals())}"
+            ),
+        }
+    )
+
+    return checks
+
+
 def _run_todo_integration_checks(root: Path) -> list[dict[str, Any]]:
     """WhatsApp todo create → Android projection equality; complete sync; dedup."""
     checks: list[dict[str, Any]] = []
@@ -1645,6 +1823,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-07/",
                     "artifacts/test/task-09/",
                     "artifacts/test/task-10/",
+                    "artifacts/test/task-11/",
                 ],
             },
         },
@@ -1674,6 +1853,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-07/verification.json",
             "artifacts/test/task-09/verification.json",
             "artifacts/test/task-10/verification.json",
+            "artifacts/test/task-11/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -2416,6 +2596,50 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             + "\n",
             encoding="utf-8",
         )
+
+    # TASK-11 Android approval inbox + soft-confirm calendar hooks.
+    # Fail-closed must not stomp happy-path task-11 verification.
+    android_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.android_approval.")
+    ]
+    android_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.android_approval.")
+    ]
+    task11_checks = android_unit + android_integration
+    task11_pass = (
+        all(c.get("result") == "PASS" for c in task11_checks) if task11_checks else False
+    )
+    if not broken:
+        t2_demo = run_t2_approval_inbox(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "task-11",
+            write_artifacts=True,
+        )
+        task11 = ROOT / "artifacts" / "test" / "task-11"
+        # run_t2 writes report/verification; enrich stamp with CI cross-check.
+        stamp_path = task11 / "verification.json"
+        if stamp_path.is_file():
+            stamp_data = json.loads(stamp_path.read_text(encoding="utf-8"))
+        else:
+            stamp_data = {}
+        stamp_data["ci_overall"] = overall
+        stamp_data["unit_checks"] = [c.get("id") for c in android_unit]
+        stamp_data["integration_checks"] = [c.get("id") for c in android_integration]
+        stamp_data["task11_pass"] = task11_pass and t2_demo.ok
+        stamp_data["result"] = "PASS" if (task11_pass and t2_demo.ok) else "FAIL"
+        stamp_path.write_text(
+            json.dumps(stamp_data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
     return 0 if overall == "PASS" else 1
 
 

@@ -22,6 +22,7 @@ from capabilities.reminders.store import ReminderStore
 from capabilities.todos.parse import looks_like_todo_add
 from capabilities.todos.service import TodoService
 from capabilities.todos.store import TodoStatus, TodoStore
+from channels.android.approvals import AcceptResult, AndroidApprovalInboxApi, ApprovalProjection
 from channels.android.projection import AndroidProjectionApi
 from harness.artifacts import write_report
 from harness.clock import FakeClock
@@ -34,7 +35,7 @@ from harness.whatsapp_transport import (
 )
 from intelligence.transcription.pipeline import TranscriptionPipeline
 from intelligence.transcription.tts import TtsMode
-from policy.action_gateway import ActionGateway
+from policy.action_gateway import ActionGateway, ProposeResult
 from policy.approvals import ApprovalStatus, ApprovalTier, is_hard_action, tier_for
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -91,6 +92,23 @@ class E2E03Result:
 
 
 @dataclass
+class T2ApprovalInboxResult:
+    """Machine-check result for T2 Android approval inbox (Accept/Deny alone)."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    accept_approval_id: Optional[str]
+    deny_approval_id: Optional[str]
+    calendar_create_after_accept: int
+    calendar_create_after_deny: int
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
 class VirtualUser:
     """Scripted WhatsApp user for harness E2E journeys."""
 
@@ -104,10 +122,14 @@ class VirtualUser:
     reminders: ReminderService
     todos: TodoService
     android: AndroidProjectionApi
+    android_inbox: AndroidApprovalInboxApi
     transport: MockWhatsAppTransport
     seed_profile: dict[str, Any] = field(default_factory=dict)
     last_turn: Optional[TransportTurnResult] = None
     last_create: Any = None
+    last_soft_confirm: Optional[ProposeResult] = None
+    last_accept: Optional[AcceptResult] = None
+    last_deny: Optional[ApprovalProjection] = None
 
     @classmethod
     def bootstrap(
@@ -153,6 +175,8 @@ class VirtualUser:
             clock=clock,
             gateway=gateway,
         )
+        assert android.approvals is not None
+        android_inbox = android.approvals
 
         vu = cls(
             owner=owner,
@@ -165,6 +189,7 @@ class VirtualUser:
             reminders=reminders,
             todos=todos,
             android=android,
+            android_inbox=android_inbox,
             transport=MockWhatsAppTransport(  # placeholder; rebound below
                 allowlist=[owner],
                 catcher=catcher,
@@ -299,6 +324,72 @@ class VirtualUser:
     def pending_approvals(self) -> list[Any]:
         return list(self.gateway.approvals.list(status=ApprovalStatus.PENDING))
 
+    def list_android_approvals(self) -> list[ApprovalProjection]:
+        """Pending approvals via the same Android inbox API the product uses."""
+        return self.android_inbox.list_pending()
+
+    def accept_approval(self, approval_id: str) -> AcceptResult:
+        """Virtual User taps Accept on Android — no human phone required."""
+        self.last_accept = self.android_inbox.accept(approval_id)
+        return self.last_accept
+
+    def deny_approval(self, approval_id: str) -> ApprovalProjection:
+        """Virtual User taps Deny on Android — adapters must not run."""
+        self.last_deny = self.android_inbox.deny(approval_id)
+        return self.last_deny
+
+    def edit_approval(
+        self,
+        approval_id: str,
+        *,
+        summary: str | None = None,
+        payload: dict[str, Any] | None = None,
+        payload_patch: dict[str, Any] | None = None,
+        estimated_cost: float | None = None,
+    ) -> ApprovalProjection:
+        """Virtual User taps Edit on Android — mutate pending details only."""
+        return self.android_inbox.edit(
+            approval_id,
+            summary=summary,
+            payload=payload,
+            payload_patch=payload_patch,
+            estimated_cost=estimated_cost,
+        )
+
+    def propose_soft_calendar(
+        self,
+        *,
+        title: str,
+        start: str,
+        end: str,
+        summary: str | None = None,
+        source_utterance: str | None = None,
+        source_channel: str = "whatsapp",
+        **payload_extra: Any,
+    ) -> ProposeResult:
+        """E2E-04 hook: create pending soft confirm; calendar create_count stays 0.
+
+        Shallow calendar path — full conflict-aware scheduling lands in TASK-13.
+        """
+        payload: dict[str, Any] = {
+            "title": title,
+            "start": start,
+            "end": end,
+            **payload_extra,
+        }
+        proposed = self.gateway.propose(
+            "calendar_create",
+            summary or f"Create calendar event: {title}",
+            payload,
+            source_channel=source_channel,
+            source_utterance=source_utterance,
+        )
+        self.last_soft_confirm = proposed
+        return proposed
+
+    def calendar_create_count(self) -> int:
+        return self.gateway.calendar.create_count
+
     def todos_list(self) -> list[Any]:
         return list(self.todo_store.list_all())
 
@@ -317,6 +408,11 @@ class VirtualUser:
             "reminders": self.store.to_dict(),
             "todos": self.todo_store.to_dict(),
             "android_projection": self.android.snapshot(),
+            "android_approvals": self.android_inbox.snapshot(),
+            "calendar": {
+                "create_count": self.gateway.calendar.create_count,
+                "events": list(self.gateway.calendar.events),
+            },
             "outbound": self.catcher.to_list(),
             "approvals_pending": [a.id for a in self.pending_approvals()],
             "hard_approvals": [a.id for a in self.hard_approval_items()],
@@ -779,6 +875,301 @@ def run_e2e_03(
                         "artifacts/test/e2e-03/android-projection.json",
                     ],
                     "todo_id": agent_todo.id if agent_todo else None,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    return result
+
+
+def run_t2_approval_inbox(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> T2ApprovalInboxResult:
+    """T2 exit — Accept/Deny exercised by Virtual User alone via Android API.
+
+    Soft-confirm calendar path (E2E-04 hooks):
+      1. Propose soft calendar → pending; create_count = 0
+      2. Virtual User Accept via Android inbox → create_count = 1
+      3. Propose another soft calendar → Deny via Android → create stays 1
+      4. Edit path: propose → Edit payload → Accept → create once more
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "task-11")
+    checks: list[dict[str, Any]] = []
+
+    vu = VirtualUser.bootstrap(root=repo)
+
+    # --- Accept path (soft calendar) ---
+    proposed = vu.propose_soft_calendar(
+        title="Focus block",
+        start="2026-01-09T09:00:00+01:00",
+        end="2026-01-09T11:00:00+01:00",
+        source_utterance="Schedule focus block Friday 09:00–11:00.",
+    )
+    pending_before = vu.list_android_approvals()
+    create_before_accept = vu.calendar_create_count()
+    soft_pending_ok = (
+        proposed.ok
+        and not proposed.executed
+        and proposed.tier == ApprovalTier.SOFT_CONFIRM.value
+        and proposed.approval_id is not None
+        and create_before_accept == 0
+        and len(pending_before) == 1
+        and pending_before[0].id == proposed.approval_id
+        and pending_before[0].action_type == "calendar_create"
+        and pending_before[0].status == ApprovalStatus.PENDING.value
+    )
+    checks.append(
+        {
+            "id": "t2.soft_calendar.pending_create_zero",
+            "result": "PASS" if soft_pending_ok else "FAIL",
+            "detail": (
+                f"ok={proposed.ok} executed={proposed.executed} tier={proposed.tier} "
+                f"approval_id={proposed.approval_id} create={create_before_accept} "
+                f"pending={len(pending_before)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    accepted = vu.accept_approval(proposed.approval_id) if proposed.approval_id else None
+    create_after_accept = vu.calendar_create_count()
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and accepted.approval.status == ApprovalStatus.EXECUTED.value
+        and create_after_accept == 1
+        and len(vu.list_android_approvals()) == 0
+        and len(vu.gateway.calendar.events) == 1
+    )
+    checks.append(
+        {
+            "id": "t2.android.accept_executes_once",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} "
+                f"status={accepted.approval.status if accepted else None} "
+                f"create={create_after_accept} events={len(vu.gateway.calendar.events)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Deny path (soft calendar) ---
+    denied_prop = vu.propose_soft_calendar(
+        title="Dentist",
+        start="2026-01-10T15:00:00+01:00",
+        end="2026-01-10T16:00:00+01:00",
+        source_utterance="Schedule dentist Saturday 15:00.",
+    )
+    create_before_deny = vu.calendar_create_count()
+    denied = vu.deny_approval(denied_prop.approval_id) if denied_prop.approval_id else None
+    create_after_deny = vu.calendar_create_count()
+    # Attempt execute after deny must fail closed.
+    late_exec = (
+        vu.gateway.execute(denied_prop.approval_id) if denied_prop.approval_id else None
+    )
+    deny_ok = (
+        denied_prop.ok
+        and denied_prop.approval_id is not None
+        and create_before_deny == 1  # only prior Accept
+        and denied is not None
+        and denied.status == ApprovalStatus.DENIED.value
+        and create_after_deny == 1
+        and late_exec is not None
+        and (not late_exec.ok)
+        and create_after_deny == vu.calendar_create_count()
+        and len(vu.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "t2.android.deny_never_executes",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"deny_status={denied.status if denied else None} "
+                f"create_before={create_before_deny} create_after={create_after_deny} "
+                f"late_exec={getattr(late_exec, 'reason', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Edit then Accept ---
+    edit_prop = vu.propose_soft_calendar(
+        title="Team sync",
+        start="2026-01-12T10:00:00+01:00",
+        end="2026-01-12T10:30:00+01:00",
+    )
+    edited = (
+        vu.edit_approval(
+            edit_prop.approval_id,
+            summary="Team sync (edited)",
+            payload_patch={"title": "Team sync (edited)", "location": "Room A"},
+        )
+        if edit_prop.approval_id
+        else None
+    )
+    create_before_edit_accept = vu.calendar_create_count()
+    edit_accept = vu.accept_approval(edit_prop.approval_id) if edit_prop.approval_id else None
+    create_after_edit_accept = vu.calendar_create_count()
+    last_event = vu.gateway.calendar.events[-1] if vu.gateway.calendar.events else {}
+    edit_ok = (
+        edited is not None
+        and edited.summary == "Team sync (edited)"
+        and edited.payload.get("title") == "Team sync (edited)"
+        and edited.payload.get("location") == "Room A"
+        and edited.status == ApprovalStatus.PENDING.value
+        and create_before_edit_accept == 1
+        and edit_accept is not None
+        and edit_accept.ok
+        and create_after_edit_accept == 2
+        and last_event.get("title") == "Team sync (edited)"
+        and last_event.get("location") == "Room A"
+    )
+    checks.append(
+        {
+            "id": "t2.android.edit_then_accept",
+            "result": "PASS" if edit_ok else "FAIL",
+            "detail": (
+                f"summary={edited.summary if edited else None!r} "
+                f"create={create_after_edit_accept} last_title={last_event.get('title')!r}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Hard buy Deny via same Android API (T2 surface covers hard inbox too) ---
+    hard = vu.gateway.propose("buy", "Buy protein powder", {"sku": "prot-1", "price": 29.0})
+    hard_pending = vu.list_android_approvals()
+    hard_deny = vu.deny_approval(hard.approval_id) if hard.approval_id else None
+    hard_ok = (
+        hard.ok
+        and hard.tier == ApprovalTier.HARD_APPROVE.value
+        and any(p.id == hard.approval_id for p in hard_pending)
+        and hard_deny is not None
+        and hard_deny.status == ApprovalStatus.DENIED.value
+        and vu.gateway.commerce.buy_count == 0
+    )
+    checks.append(
+        {
+            "id": "t2.android.hard_buy_deny",
+            "result": "PASS" if hard_ok else "FAIL",
+            "detail": (
+                f"tier={hard.tier} buy_count={vu.gateway.commerce.buy_count} "
+                f"deny={hard_deny.status if hard_deny else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = T2ApprovalInboxResult(
+        result=overall,
+        checks=checks,
+        accept_approval_id=proposed.approval_id,
+        deny_approval_id=denied_prop.approval_id,
+        calendar_create_after_accept=create_after_accept,
+        calendar_create_after_deny=create_after_deny,
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "approvals.json").write_text(
+            json.dumps(vu.android_inbox.snapshot(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (out / "calendar.json").write_text(
+            json.dumps(
+                {
+                    "create_count": vu.calendar_create_count(),
+                    "events": vu.gateway.calendar.events,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "trace.jsonl").write_text(
+            json.dumps(
+                {
+                    "flow": "T2-approval-inbox",
+                    "accept_id": proposed.approval_id,
+                    "deny_id": denied_prop.approval_id,
+                    "edit_id": edit_prop.approval_id,
+                    "hard_deny_id": hard.approval_id,
+                    "calendar_create_count": vu.calendar_create_count(),
+                    "buy_count": vu.gateway.commerce.buy_count,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            out,
+            layer="task-11",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "T2-Android-approval-inbox",
+                "gate": True,
+                "t2_exit": overall == "PASS",
+                "e2e04_hooks": True,
+                "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-01",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-11/",
+                },
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "T2 exit: Virtual User alone Accept/Deny/Edit via Android "
+                        "approval inbox API; soft-confirm calendar create_count=0 "
+                        "until Accept; Deny never executes (E2E-04 hooks)"
+                    ),
+                    "result": overall,
+                    "flow": "T2-Android-approval-inbox",
+                    "gate": True,
+                    "t2_exit": overall == "PASS",
+                    "invariants": ["INV-APPR-003"],
+                    "checks": [c["id"] for c in checks],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-11/report.json",
+                        "artifacts/test/task-11/verification.json",
+                        "artifacts/test/task-11/approvals.json",
+                        "artifacts/test/task-11/calendar.json",
+                        "artifacts/test/task-11/trace.jsonl",
+                    ],
+                    "accept_approval_id": proposed.approval_id,
+                    "deny_approval_id": denied_prop.approval_id,
+                    "calendar_create_after_accept": create_after_accept,
+                    "calendar_create_after_deny": create_after_deny,
                 },
                 indent=2,
                 sort_keys=True,

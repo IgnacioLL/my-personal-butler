@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from capabilities.todos.store import Todo, TodoSource, TodoStatus, TodoStore
+from channels.android.approvals import AndroidApprovalInboxApi
 from harness.clock import FakeClock
 from policy.action_gateway import ActionGateway
 
@@ -31,7 +32,7 @@ def _project(todo: Todo) -> TodoProjection:
 
 
 class AndroidProjectionApi:
-    """API-level Android node simulation for todo sync."""
+    """API-level Android node simulation for todo sync + approval inbox."""
 
     def __init__(
         self,
@@ -43,8 +44,10 @@ class AndroidProjectionApi:
         self.store = store
         self.clock = clock
         self.gateway = gateway
+        self.approvals: AndroidApprovalInboxApi | None = None
         if self.gateway is not None:
             self.gateway.todos = self.store
+            self.approvals = AndroidApprovalInboxApi(self.gateway)
 
     def list_todos(self, *, status: str | None = None) -> list[TodoProjection]:
         todos = self.store.list_all()
@@ -79,7 +82,10 @@ class AndroidProjectionApi:
         return _project(todo)
 
     def snapshot(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "todos": [p.to_dict() for p in self.list_todos()],
             "open_count": len(self.store.list_open()),
         }
+        if self.approvals is not None:
+            data["approvals"] = self.approvals.snapshot()
+        return data
