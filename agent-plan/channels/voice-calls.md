@@ -22,7 +22,7 @@ WhatsApp is great for async. Calls are for:
 
 ## Out of scope (v1)
 
-- Buying or booking during a live call
+- Buying, booking, or applying self-mod patches during a live call
 - Open inbound from anyone
 - Long therapy-style calls as the default interface
 
@@ -37,7 +37,7 @@ Use OpenClaw voice-call plugin with Twilio (or Telnyx/Plivo):
 ## Safety rules
 
 1. Call mode tool allowlist is narrow
-2. Any mutating action becomes a post-call approval/task
+2. Any mutating action becomes a post-call approval/task (including code-change proposals)
 3. Quiet hours respected unless marked emergency
 4. Cap call frequency (avoid spam loops)
 
@@ -55,5 +55,5 @@ Reminder fires → policy says "call"
 
 - [ ] Agent can place an outbound call to your number
 - [ ] Call content is grounded in the triggering reminder
-- [ ] No purchase/booking tools available mid-call
+- [ ] No purchase/booking/self-mod-apply tools available mid-call
 - [ ] Call creates an auditable after-call note
