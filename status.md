@@ -244,11 +244,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-17
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** WhatsApp → Android → call ordered touches; no buy/book/self-mod on call session.
 - **Acceptance:** T4 exit.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — `make e2e-02` exit 0; Virtual User journey: quiet hours off + high-priority recurring habit; clock advances fire WhatsApp → Android → outbound call; after-call WhatsApp summary queued; mid-call buy/book/self_mod_apply blocked (`call_mode_forbidden_hard_action`); ordered channel touches asserted. Wired into `test:ci` e2e gate layer alongside E2E-01/03/04/05. INV-* intact (no weaken). **T4 exit:** mock voice (TASK-17) + E2E-02 ladder (TASK-18) + `INV-APPR-005` green — Phase 4 / T4 unlock ready pending Agent B review.
+- **Artifacts:** `scripts/run_e2e_02.py`, `src/harness/virtual_user.py` (`run_e2e_02`), `Makefile` (`e2e-02`), `scripts/run_test_ci.py` (gate), `artifacts/test/e2e-02/`
 
 ### TASK-19 — Bookings skill (stub portal) + hard approve
 - **Phase:** 5 / T5
@@ -398,6 +398,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:15 | TASK-17 | Agent A | cursor-grok-4.5-high | implement | Mock voice + INV-APPR-005 + ladder; status → review |
 | 2026-08-08 23:05 | TASK-17 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01/03/04/05 exit 0; call-mode + ladder + summary spot-checks; E2E-02 ready; status → done |
 | 2026-08-09 00:10 | TASK-18 | subagent-A | cursor-grok-4.5-high | implement | E2E-02 habit escalation ladder |
+| 2026-08-09 00:25 | TASK-18 | Agent A | cursor-grok-4.5-high | implement | E2E-02 gate + test:ci; T4 exit ready; status → review |
 
 ---
 
@@ -420,5 +421,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-18 in_progress (E2E-02).  
+**Now:** TASK-18 review (E2E-02; T4 exit pending B).  
 **Next:** TASK-18 Agent B, then Phase 5 bookings.

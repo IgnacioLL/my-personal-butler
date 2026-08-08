@@ -23,13 +23,17 @@ from capabilities.diet.constraints import banned_terms, text_violations
 from capabilities.diet.parse import EXPECTED_E2E05_UTTERANCE, looks_like_meal_plan
 from capabilities.diet.service import DietService, PlanMealsResult
 from capabilities.reminders.parse import parse_reminder
+from capabilities.reminders.scheduler import ReminderScheduler
 from capabilities.reminders.service import ReminderService
-from capabilities.reminders.store import ReminderStore
+from capabilities.reminders.store import EscalationChannel, ReminderStore
 from capabilities.todos.parse import looks_like_todo_add
 from capabilities.todos.service import TodoService
 from capabilities.todos.store import TodoStatus, TodoStore
 from channels.android.approvals import AcceptResult, AndroidApprovalInboxApi, ApprovalProjection
+from channels.android.notifications import AndroidNotificationCatcher
 from channels.android.projection import AndroidProjectionApi
+from channels.voice.allowlist import CALL_MODE_FORBIDDEN_TOOLS
+from channels.voice.provider import MockVoiceProvider
 from harness.artifacts import write_report
 from harness.clock import FakeClock
 from harness.outbound import OutboundMessageCatcher
@@ -59,6 +63,8 @@ EXPECTED_E2E04_DENY_UTTERANCE = "Schedule dentist Saturday 15:00–16:00."
 EXPECTED_E2E01_TRANSCRIPT = "Remind me Sunday at 18:00 to call grandma."
 E2E01_AUDIO_FIXTURE = "fx-reminder"
 
+EXPECTED_E2E02_HABIT = "every Sunday at 18:00 remind me to stretch"
+
 
 def _looks_like_reminder(body: str) -> bool:
     return bool(_REMIND_INTENT.search(body or ""))
@@ -77,6 +83,25 @@ class E2E01Result:
     confirm_body: Optional[str]
     hard_approvals: int
     outbound_count: int
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
+class E2E02Result:
+    """Machine-check result for E2E-02 habit escalation ladder journey."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    habit_id: Optional[str]
+    reminder_id: Optional[str]
+    channel_order: list[str]
+    call_id: Optional[str]
+    summary_queued: bool
+    forbidden_blocked: bool
     artifacts_dir: str
 
     @property
@@ -1284,6 +1309,408 @@ def run_e2e_01(
             "expected_due": expected_due.isoformat(),
             "reminder_id": rem.id if rem else None,
             "hard_approvals": len(hard),
+        }
+        (out / "verification.json").write_text(
+            json.dumps(stamp, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    return result
+
+
+def run_e2e_02(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E02Result:
+    """E2E-02 — Habit escalation ladder (gate-tagged; T4 exit).
+
+    Setup: recurring high-priority habit; quiet hours off.
+    1. Advance clock to fire → WhatsApp reminder.
+    2. Advance without completion → Android notification.
+    3. Advance again → mock outbound call.
+    4. After-call summary queued to WhatsApp.
+
+    Checks: ordered channel touches; call tools exclude buy/book/self-mod-apply.
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-02")
+    checks: list[dict[str, Any]] = []
+
+    vu = VirtualUser.bootstrap(root=repo)
+
+    # Setup: quiet hours off (seed profile has quiet hours by default).
+    vu.memory.remember(
+        "preferences",
+        "quiet_hours",
+        {"enabled": False},
+        explicit=True,
+    )
+    prefs = vu.memory.load_hot_profile().get("preferences", {})
+    quiet = prefs.get("quiet_hours") or {}
+    quiet_off = quiet.get("enabled") is False or quiet == {}
+    checks.append(
+        {
+            "id": "e2e-02.setup_quiet_hours_off",
+            "result": "PASS" if quiet_off else "FAIL",
+            "detail": f"quiet_hours={quiet}",
+            "gate": True,
+        }
+    )
+
+    created = vu.reminders.create_from_utterance(
+        EXPECTED_E2E02_HABIT,
+        as_habit=True,
+        habit_priority="high",
+        escalation_enabled=True,
+    )
+    habit = created.habit
+    rem = created.reminder
+    setup_ok = (
+        created.ok
+        and habit is not None
+        and rem is not None
+        and habit.priority == "high"
+        and habit.escalation_enabled
+        and habit.escalation_step == 0
+        and habit.current_channel() is EscalationChannel.WHATSAPP
+        and rem.kind.value == "recurring"
+    )
+    checks.append(
+        {
+            "id": "e2e-02.setup_high_priority_habit",
+            "result": "PASS" if setup_ok else "FAIL",
+            "detail": (
+                f"ok={created.ok} habit={getattr(habit, 'id', None)} "
+                f"priority={getattr(habit, 'priority', None)} "
+                f"escalation={getattr(habit, 'escalation_enabled', None)} "
+                f"step={getattr(habit, 'escalation_step', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    voice = MockVoiceProvider(vu.catcher, vu.clock, default_to=vu.owner)
+    android = AndroidNotificationCatcher(vu.clock, vu.catcher, default_to=vu.owner)
+    # auto_complete_call=False so step 3 places a live call; step 4 ends + summary.
+    sched = ReminderScheduler(
+        vu.store,
+        vu.clock,
+        vu.catcher,
+        kill=vu.gateway.kill,
+        default_recipient=vu.owner,
+        voice=voice,
+        android=android,
+        auto_complete_call=False,
+    )
+
+    # Step 1 — Advance to fire → WhatsApp reminder.
+    assert rem is not None and habit is not None
+    fires1 = sched.advance(rem.due_at - vu.clock.now())
+    habit1 = vu.store.get_habit(habit.id)
+    wa_msgs = [
+        m
+        for m in vu.catcher.messages
+        if m.channel == "whatsapp" and m.meta.get("kind") == "reminder_fire"
+    ]
+    step1_ok = (
+        len(fires1) == 1
+        and fires1[0].emitted
+        and fires1[0].channel == "whatsapp"
+        and len(wa_msgs) >= 1
+        and any("Habit reminder:" in m.body for m in wa_msgs)
+        and android.count() == 0
+        and voice.call_count == 0
+        and habit1 is not None
+        and habit1.escalation_step == 1
+        and habit1.current_channel() is EscalationChannel.ANDROID
+        and not habit1.completed_this_cycle
+    )
+    checks.append(
+        {
+            "id": "e2e-02.step1_whatsapp_reminder",
+            "result": "PASS" if step1_ok else "FAIL",
+            "detail": (
+                f"channel={fires1[0].channel if fires1 else None} "
+                f"wa_fires={len(wa_msgs)} android={android.count()} "
+                f"calls={voice.call_count} step={getattr(habit1, 'escalation_step', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # Step 2 — Advance without completion → Android notification.
+    rem_after_1 = vu.store.get(rem.id)
+    assert rem_after_1 is not None
+    fires2 = sched.advance(rem_after_1.due_at - vu.clock.now())
+    habit2 = vu.store.get_habit(habit.id)
+    step2_ok = (
+        len(fires2) == 1
+        and fires2[0].emitted
+        and fires2[0].channel == "android"
+        and fires2[0].notification_id is not None
+        and android.count() == 1
+        and any(m.channel == "android" for m in vu.catcher.messages)
+        and voice.call_count == 0
+        and habit2 is not None
+        and habit2.escalation_step == 2
+        and habit2.current_channel() is EscalationChannel.CALL
+        and not habit2.completed_this_cycle
+    )
+    checks.append(
+        {
+            "id": "e2e-02.step2_android_notification",
+            "result": "PASS" if step2_ok else "FAIL",
+            "detail": (
+                f"channel={fires2[0].channel if fires2 else None} "
+                f"notification_id={fires2[0].notification_id if fires2 else None} "
+                f"android={android.count()} step={getattr(habit2, 'escalation_step', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # Step 3 — Advance again → mock outbound call (still active; no summary yet).
+    rem_after_2 = vu.store.get(rem.id)
+    assert rem_after_2 is not None
+    fires3 = sched.advance(rem_after_2.due_at - vu.clock.now())
+    call_id = fires3[0].call_id if fires3 else None
+    session = voice.get(call_id) if call_id else None
+    step3_ok = (
+        len(fires3) == 1
+        and fires3[0].emitted
+        and fires3[0].channel == "call"
+        and call_id is not None
+        and session is not None
+        and session.status == "active"
+        and voice.call_count == 1
+        and not fires3[0].summary_queued
+    )
+    checks.append(
+        {
+            "id": "e2e-02.step3_outbound_call",
+            "result": "PASS" if step3_ok else "FAIL",
+            "detail": (
+                f"channel={fires3[0].channel if fires3 else None} "
+                f"call_id={call_id} status={getattr(session, 'status', None)} "
+                f"call_count={voice.call_count}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # Call tools exclude buy/book/self-mod-apply (INV-APPR-005 on live escalation call).
+    blocked: list[bool] = []
+    block_reasons: list[str] = []
+    if call_id is not None and session is not None and session.status == "active":
+        for tool in sorted(CALL_MODE_FORBIDDEN_TOOLS):
+            res = voice.invoke_tool(call_id, tool, {"item": tool})
+            ok_block = (not res.ok) and res.reason == "call_mode_forbidden_hard_action"
+            blocked.append(ok_block)
+            block_reasons.append(f"{tool}:{res.reason}")
+        read_ok = voice.invoke_tool(call_id, "memory_read", {"key": "prefs"}).ok
+    else:
+        read_ok = False
+    forbidden_ok = len(blocked) == len(CALL_MODE_FORBIDDEN_TOOLS) and all(blocked) and read_ok
+    checks.append(
+        {
+            "id": "e2e-02.call_tools_exclude_hard_actions",
+            "result": "PASS" if forbidden_ok else "FAIL",
+            "detail": f"blocked={block_reasons} read_ok={read_ok}",
+            "gate": True,
+        }
+    )
+
+    # Step 4 — After-call summary queued to WhatsApp.
+    summary_queued = False
+    if call_id is not None:
+        ended = voice.end_call(call_id, outcome="reminder_delivered")
+        summary_queued = ended.summary_queued
+    summaries = [
+        m
+        for m in vu.catcher.messages
+        if m.channel == "whatsapp" and m.meta.get("kind") == "after_call_summary"
+    ]
+    step4_ok = (
+        summary_queued
+        and len(summaries) == 1
+        and "Call summary:" in summaries[0].body
+        and summaries[0].meta.get("call_id") == call_id
+    )
+    checks.append(
+        {
+            "id": "e2e-02.step4_after_call_whatsapp_summary",
+            "result": "PASS" if step4_ok else "FAIL",
+            "detail": (
+                f"summary_queued={summary_queued} summaries={len(summaries)} "
+                f"body={summaries[0].body if summaries else None!r}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # Ordered channel touches: WhatsApp → Android → call.
+    touch_order = [f.channel for f in (fires1 + fires2 + fires3) if f.emitted]
+    order_ok = touch_order == ["whatsapp", "android", "call"]
+    ladder_touches = sched.ladder.channel_touch_order() if sched.ladder else []
+    ladder_ok = ladder_touches == ["whatsapp", "android", "call"]
+    checks.append(
+        {
+            "id": "e2e-02.ordered_channel_touches",
+            "result": "PASS" if order_ok and ladder_ok else "FAIL",
+            "detail": f"fires={touch_order} ladder={ladder_touches}",
+            "gate": True,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = E2E02Result(
+        result=overall,
+        checks=checks,
+        habit_id=habit.id if habit else None,
+        reminder_id=rem.id if rem else None,
+        channel_order=touch_order,
+        call_id=call_id,
+        summary_queued=summary_queued,
+        forbidden_blocked=forbidden_ok,
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        vu.catcher.write_json(out / "outbound-messages.json")
+        android_path = out / "android-notifications.json"
+        android_path.write_text(
+            json.dumps(android.to_list(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (out / "calls.json").write_text(
+            json.dumps(voice.snapshot(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (out / "reminders.json").write_text(
+            json.dumps(vu.store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (out / "escalation-touches.json").write_text(
+            json.dumps(
+                {
+                    "channel_order": touch_order,
+                    "ladder_touches": ladder_touches,
+                    "fires": [
+                        {
+                            "channel": f.channel,
+                            "emitted": f.emitted,
+                            "escalation_step": f.escalation_step,
+                            "call_id": f.call_id,
+                            "notification_id": f.notification_id,
+                            "summary_queued": f.summary_queued,
+                        }
+                        for f in (fires1 + fires2 + fires3)
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "trace.jsonl").write_text(
+            json.dumps(
+                {
+                    "flow": "E2E-02",
+                    "setup": {
+                        "timezone": vu.timezone,
+                        "clock_start": "2026-01-05T10:00:00+01:00",
+                        "quiet_hours": quiet,
+                        "habit_utterance": EXPECTED_E2E02_HABIT,
+                        "habit_priority": "high",
+                        "escalation_enabled": True,
+                    },
+                    "habit_id": habit.id if habit else None,
+                    "reminder_id": rem.id if rem else None,
+                    "channel_order": touch_order,
+                    "call_id": call_id,
+                    "summary_queued": summary_queued,
+                    "forbidden_blocked": forbidden_ok,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            out,
+            layer="e2e-02",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-02",
+                "gate": True,
+                "t4_exit": True,
+                "habit_id": habit.id if habit else None,
+                "reminder_id": rem.id if rem else None,
+                "channel_order": touch_order,
+                "call_id": call_id,
+                "invariants": ["INV-APPR-005"],
+                "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "python3 scripts/run_e2e_02.py",
+                        "make e2e-02",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "prior_gates": [
+                        "make e2e-01",
+                        "make e2e-03",
+                        "make e2e-04",
+                        "make e2e-05",
+                    ],
+                    "artifacts": "artifacts/test/e2e-02/",
+                },
+            },
+        )
+        stamp = {
+            "claim": (
+                "E2E-02 habit escalation ladder: high-priority recurring habit with "
+                "quiet hours off climbs WhatsApp → Android → outbound call without "
+                "completion; after-call WhatsApp summary queued; mid-call tools "
+                "exclude buy/book/self_mod_apply (INV-APPR-005). T4 exit."
+            ),
+            "result": overall,
+            "flow": "E2E-02",
+            "gate": True,
+            "t4_exit": True,
+            "invariants": ["INV-APPR-005"],
+            "checks": [c["id"] for c in checks],
+            "channel_order": touch_order,
+            "commands": [
+                "python3 scripts/run_e2e_02.py",
+                "make e2e-02",
+                "./scripts/test-ci.sh",
+                "make test-ci",
+            ],
+            "artifacts": [
+                "artifacts/test/e2e-02/report.json",
+                "artifacts/test/e2e-02/verification.json",
+                "artifacts/test/e2e-02/outbound-messages.json",
+                "artifacts/test/e2e-02/android-notifications.json",
+                "artifacts/test/e2e-02/calls.json",
+                "artifacts/test/e2e-02/escalation-touches.json",
+                "artifacts/test/e2e-02/reminders.json",
+                "artifacts/test/e2e-02/trace.jsonl",
+            ],
+            "habit_id": habit.id if habit else None,
+            "reminder_id": rem.id if rem else None,
+            "call_id": call_id,
+            "summary_queued": summary_queued,
+            "forbidden_blocked": forbidden_ok,
         }
         (out / "verification.json").write_text(
             json.dumps(stamp, indent=2, sort_keys=True) + "\n",

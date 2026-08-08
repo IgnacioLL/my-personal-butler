@@ -1,10 +1,11 @@
-.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-03 e2e-04 e2e-05 help
+.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-02 e2e-03 e2e-04 e2e-05 help
 
 help:
 	@echo "Targets:"
 	@echo "  test-ci              Run CI pipeline (unit + INV contract + integration + gate e2e)"
 	@echo "  test-ci-fail-closed  Prove fail-closed: broken INV must exit non-zero"
 	@echo "  e2e-01               Run E2E-01 Virtual User voice reminder journey"
+	@echo "  e2e-02               Run E2E-02 Habit escalation ladder journey (T4)"
 	@echo "  e2e-03               Run E2E-03 Todo WhatsApp → Android journey"
 	@echo "  e2e-04               Run E2E-04 Calendar soft confirm journey"
 	@echo "  e2e-05               Run E2E-05 Diet plan → groceries journey"
@@ -26,6 +27,9 @@ test-ci-fail-closed:
 
 e2e-01:
 	@PYTHONPATH=src python3 ./scripts/run_e2e_01.py
+
+e2e-02:
+	@PYTHONPATH=src python3 ./scripts/run_e2e_02.py
 
 e2e-03:
 	@PYTHONPATH=src python3 ./scripts/run_e2e_03.py

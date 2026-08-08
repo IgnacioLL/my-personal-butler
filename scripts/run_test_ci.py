@@ -33,6 +33,7 @@ from harness.virtual_user import (  # noqa: E402
     EXPECTED_E2E05_UTTERANCE,
     VirtualUser,
     run_e2e_01,
+    run_e2e_02,
     run_e2e_03,
     run_e2e_04,
     run_e2e_05,
@@ -315,7 +316,7 @@ def run_contract(out_dir: Path, *, broken_allow_all: bool) -> dict[str, Any]:
 
 
 def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, Any]:
-    """Gate-tagged E2E flows (ci-gates.md). E2E-01 + E2E-03 + E2E-04 + E2E-05 Virtual User journeys."""
+    """Gate-tagged E2E flows (ci-gates.md). E2E-01..05 Virtual User journeys (T4)."""
     checks: list[dict[str, Any]] = []
     e2e01_dir = ROOT / "artifacts" / "test" / "e2e-01"
     journey01 = run_e2e_01(
@@ -331,6 +332,23 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
                 "detail": check.get("detail", ""),
                 "gate": True,
                 "flow": "E2E-01",
+            }
+        )
+
+    e2e02_dir = ROOT / "artifacts" / "test" / "e2e-02"
+    journey02 = run_e2e_02(
+        root=ROOT,
+        artifacts_dir=e2e02_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey02.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": True,
+                "flow": "E2E-02",
             }
         )
 
@@ -389,7 +407,11 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
     layer_dir = out_dir / "e2e"
     result = (
         "PASS"
-        if journey01.ok and journey03.ok and journey04.ok and journey05.ok
+        if journey01.ok
+        and journey02.ok
+        and journey03.ok
+        and journey04.ok
+        and journey05.ok
         else "FAIL"
     )
     write_report(
@@ -398,11 +420,13 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         result=result,
         checks=checks,
         extra={
-            "gate_flows": ["E2E-01", "E2E-03", "E2E-04", "E2E-05"],
+            "gate_flows": ["E2E-01", "E2E-02", "E2E-03", "E2E-04", "E2E-05"],
             "e2e_01_artifacts": "artifacts/test/e2e-01/",
+            "e2e_02_artifacts": "artifacts/test/e2e-02/",
             "e2e_03_artifacts": "artifacts/test/e2e-03/",
             "e2e_04_artifacts": "artifacts/test/e2e-04/",
             "e2e_05_artifacts": "artifacts/test/e2e-05/",
+            "t4_exit": journey02.ok,
             "harness": "VirtualUser",
         },
     )
@@ -410,7 +434,7 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         "layer": "e2e",
         "result": result,
         "checks": checks,
-        "flows": ["E2E-01", "E2E-03", "E2E-04", "E2E-05"],
+        "flows": ["E2E-01", "E2E-02", "E2E-03", "E2E-04", "E2E-05"],
     }
 
 
@@ -2698,6 +2722,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                 "artifacts": [
                     "artifacts/test/ci/",
                     "artifacts/test/e2e-01/",
+                    "artifacts/test/e2e-02/",
                     "artifacts/test/e2e-03/",
                     "artifacts/test/e2e-04/",
                     "artifacts/test/e2e-05/",
@@ -2722,14 +2747,14 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     stamp = {
         "claim": (
             "WhatsApp ingress + memory R/W + transcription + reminders/habits + "
-            "E2E-01 voice reminder + E2E-03 todo sync + E2E-04 calendar soft "
-            "confirm + E2E-05 diet → groceries gates + TASK-17 outbound voice "
-            "calls (INV-APPR-005) + habit escalation ladder scaffolding: "
+            "E2E-01 voice reminder + E2E-02 habit escalation ladder (T4) + "
+            "E2E-03 todo sync + E2E-04 calendar soft confirm + E2E-05 diet → "
+            "groceries gates + TASK-17 outbound voice calls (INV-APPR-005): "
             "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
             "Android projection equality; calendar soft-confirm (INV-APPR-003); "
             "diet plan with banned-ingredient absence + grocery todos; "
-            "call-mode blocks buy/book/self_mod_apply; after-call WhatsApp "
-            "summary; fail-closed on broken INV"
+            "WhatsApp→Android→call ordered touches; after-call WhatsApp summary; "
+            "call-mode blocks buy/book/self_mod_apply; fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -2741,6 +2766,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         "artifacts": [
             "artifacts/test/ci/report.json",
             "artifacts/test/e2e-01/verification.json",
+            "artifacts/test/e2e-02/verification.json",
             "artifacts/test/e2e-03/verification.json",
             "artifacts/test/e2e-04/verification.json",
             "artifacts/test/e2e-05/verification.json",
@@ -2763,7 +2789,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             if L["layer"] == "contract"
             for c in L.get("checks", [])
         ],
-        "gate_e2e": ["E2E-01", "E2E-03", "E2E-04", "E2E-05"],
+        "gate_e2e": ["E2E-01", "E2E-02", "E2E-03", "E2E-04", "E2E-05"],
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",

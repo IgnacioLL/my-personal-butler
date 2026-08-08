@@ -5,6 +5,7 @@
 | [`test-ci.sh`](./test-ci.sh) | **`test:ci`** entrypoint — unit + contract/INV-* + integration + gate e2e |
 | [`run_test_ci.py`](./run_test_ci.py) | Layer runner (stdlib); writes `artifacts/test/ci/` + mirrors e2e-01 |
 | [`run_e2e_01.py`](./run_e2e_01.py) | E2E-01 Virtual User voice reminder journey (also invoked by test:ci) |
+| [`run_e2e_02.py`](./run_e2e_02.py) | E2E-02 Habit escalation ladder journey (also invoked by test:ci; T4) |
 | [`run_e2e_03.py`](./run_e2e_03.py) | E2E-03 Todo WhatsApp → Android journey (also invoked by test:ci) |
 | [`run_e2e_04.py`](./run_e2e_04.py) | E2E-04 Calendar soft confirm journey (also invoked by test:ci) |
 | [`run_e2e_05.py`](./run_e2e_05.py) | E2E-05 Diet plan → groceries journey (also invoked by test:ci) |
@@ -16,6 +17,7 @@
 make test-ci
 make test-ci-fail-closed             # proves broken INV is rejected
 make e2e-01                          # E2E-01 alone
+make e2e-02                          # E2E-02 alone (habit escalation; T4)
 make e2e-03                          # E2E-03 alone
 make e2e-04                          # E2E-04 alone
 make e2e-05                          # E2E-05 alone
