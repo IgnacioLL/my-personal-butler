@@ -288,11 +288,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-21
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Full E2E-07 including deny path for merge gate.
 - **Acceptance:** T6 exit; gate deny path green.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — `make e2e-07` exit 0; `make test-ci` exit 0; `make test-ci-fail-closed` exit 0; prior gates `e2e-01`/`e2e-06` exit 0. Spec paths: propose price 29.99 + buy=0; Accept under cap → dry-run receipt/audit buy=1; freeze → `freeze_spending` buy=0 (stale accepted); over cap → `spend_cap_daily` buy=0; Deny → buy=0 + task denied. Fail-closed does not stomp e2e-07/task-22 verification (`t6_exit=true`). INV-* intact (no weaken). **T6 exit ready** — dry-run merchant + E2E-07 + INV-PAY-*.
+- **Artifacts:** `src/harness/virtual_user.py` (`run_e2e_07`, `E2E07Result`), `scripts/run_e2e_07.py`, `Makefile` (`e2e-07`), `scripts/run_test_ci.py` (gate + task-22), `scripts/test-ci.sh`, `scripts/README.md`, `artifacts/test/e2e-07/`, `artifacts/test/task-22/`
 
 ### TASK-23 — Self-modification (diff → hard approve → apply)
 - **Phase:** 7 / T7
@@ -410,6 +410,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:25 | TASK-21 | Agent A | cursor-grok-4.5-high | implement | Shopping dry-run + INV-PAY-001/002 + caps/freeze; status → review |
 | 2026-08-08 23:26 | TASK-21 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/sample e2e exit 0; propose/accept/freeze/cap/INV-PAY spot-checks; E2E-07 ready; status → done |
 | 2026-08-09 01:40 | TASK-22 | subagent-A | cursor-grok-4.5-high | implement | E2E-07 shopping cap/freeze/deny gate |
+| 2026-08-09 02:00 | TASK-22 | Agent A | cursor-grok-4.5-high | implement | E2E-07 gate + test:ci; T6 exit ready; status → review |
 
 ---
 
@@ -432,5 +433,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-22 in_progress (E2E-07).  
-**Next:** TASK-22 Agent B, then Phase 7 self-mod.
+**Now:** TASK-22 review (E2E-07 / T6 exit ready).  
+**Next:** Agent B review TASK-22, then Phase 7 self-mod.
