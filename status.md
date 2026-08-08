@@ -299,7 +299,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-02, TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Allowlisted paths; propose diff; apply only on Accept; freeze self-mod; secrets rejection; policy-change subtype; rollback refs; `INV-SELF-*`. Per `capabilities/self-modification.md`.
 - **Acceptance:** Sample workspace fixtures; invariants green.
 - **Result:** _(agent)_
@@ -412,6 +412,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 01:40 | TASK-22 | subagent-A | cursor-grok-4.5-high | implement | E2E-07 shopping cap/freeze/deny gate |
 | 2026-08-09 02:00 | TASK-22 | Agent A | cursor-grok-4.5-high | implement | E2E-07 gate + test:ci; T6 exit ready; status → review |
 | 2026-08-08 23:31 | TASK-22 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-07/test-ci/fail-closed/sample e2e exit 0; accept/freeze/cap/deny spot-checks; T6 exit; status → done |
+| 2026-08-09 01:55 | TASK-23 | subagent-A | cursor-grok-4.5-high | implement | Self-mod allowlist + hard approve apply + INV-SELF |
 
 ---
 
