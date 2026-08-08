@@ -126,7 +126,6 @@ class E2E03Result:
 
 
 @dataclass
-@dataclass
 class E2E04Result:
     """Machine-check result for E2E-04 calendar soft confirm journey."""
 

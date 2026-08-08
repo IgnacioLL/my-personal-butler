@@ -35,7 +35,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | Fake clock utility | done | `src/harness/clock.py` — `now()` / `advance(duration)` |
 | INV-* runner skeleton | done | `src/harness/inv_runner.py` + `src/invariants/` |
 | Virtual User harness | done | `src/harness/virtual_user.py` — inject audio/text, create reminders, assert state (E2E-01 gate) |
-| Phase exits require matching T* unlock | pending | T4 ready (TASK-17+18): mock voice + E2E-02 + INV-APPR-005 — awaiting Agent B |
+| Phase exits require matching T* unlock | done | T4 exit PASS (TASK-17+18): mock voice + E2E-02 ladder + INV-APPR-005 |
 
 ---
 
@@ -244,10 +244,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-17
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** WhatsApp → Android → call ordered touches; no buy/book/self-mod on call session.
 - **Acceptance:** T4 exit.
-- **Result:** PASS (Agent A implement) — Re-ran `make e2e-02` exit 0, `make e2e-01/03/04/05` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0. Virtual User journey: quiet hours off + high-priority recurring habit; clock advances fire WhatsApp → Android → outbound call; after-call WhatsApp summary queued; mid-call buy/book/self_mod_apply blocked (`call_mode_forbidden_hard_action`); ordered channel touches asserted. Wired into `test:ci` e2e gate layer. INV-* intact (no weaken). **T4 exit:** mock voice (TASK-17) + E2E-02 ladder (TASK-18) + `INV-APPR-005` green — Phase 4 / T4 unlock ready pending Agent B review.
+- **Result:** PASS (Agent B review) — Re-ran `make e2e-02` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-01/03/04/05` exit 0. Spot-checks: ordered channel touches WhatsApp→Android→call (`escalation-touches.json` + ladder); mid-call `buy`/`book`/`self_mod_apply` → `call_mode_forbidden_hard_action` while `memory_read` allowed (`INV-APPR-005`); after-call WhatsApp summary queued. Review fix: drop duplicate `@dataclass` on `E2E04Result`. Fail-closed does not stomp e2e-02 verification (still PASS). INV-* intact (no weaken). **T4 exit PASS** — mock voice (TASK-17) + E2E-02 ladder (TASK-18) + `INV-APPR-005` green.
 - **Artifacts:** `scripts/run_e2e_02.py`, `src/harness/virtual_user.py` (`run_e2e_02`), `Makefile` (`e2e-02`), `scripts/run_test_ci.py` (gate), `artifacts/test/e2e-02/`
 
 ### TASK-19 — Bookings skill (stub portal) + hard approve
@@ -399,6 +399,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:05 | TASK-17 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01/03/04/05 exit 0; call-mode + ladder + summary spot-checks; E2E-02 ready; status → done |
 | 2026-08-09 00:10 | TASK-18 | subagent-A | cursor-grok-4.5-high | implement | E2E-02 habit escalation ladder |
 | 2026-08-09 00:25 | TASK-18 | Agent A | cursor-grok-4.5-high | implement | E2E-02 gate + test:ci; T4 exit ready; status → review |
+| 2026-08-09 00:35 | TASK-18 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-02/test-ci/fail-closed/prior e2e exit 0; ordered touches + allowlist spot-checks; T4 exit; status → done |
 
 ---
 
@@ -421,5 +422,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-18 review (E2E-02; T4 exit pending B).  
-**Next:** TASK-18 Agent B, then Phase 5 bookings.
+**Now:** TASK-18 done; T4 exit PASS.  
+**Next:** Phase 5 bookings (TASK-19).
