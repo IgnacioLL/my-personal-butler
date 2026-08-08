@@ -1,4 +1,4 @@
-.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-02 e2e-03 e2e-04 e2e-05 e2e-06 e2e-07 e2e-09 help
+.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-02 e2e-03 e2e-04 e2e-05 e2e-06 e2e-07 e2e-08 e2e-09 help
 
 help:
 	@echo "Targets:"
@@ -11,6 +11,7 @@ help:
 	@echo "  e2e-05               Run E2E-05 Diet plan → groceries journey"
 	@echo "  e2e-06               Run E2E-06 Booksy propose → approve → book (T5)"
 	@echo "  e2e-07               Run E2E-07 Shopping with cap / freeze (+ deny; T6)"
+	@echo "  e2e-08               Run E2E-08 Self-mod patch accept + deny (T7)"
 	@echo "  e2e-09               Run E2E-09 Ignored hard approval expiry"
 	@echo "  test                 Alias for test-ci"
 
@@ -48,6 +49,9 @@ e2e-06:
 
 e2e-07:
 	@PYTHONPATH=src python3 ./scripts/run_e2e_07.py
+
+e2e-08:
+	@PYTHONPATH=src python3 ./scripts/run_e2e_08.py
 
 e2e-09:
 	@PYTHONPATH=src python3 ./scripts/run_e2e_09.py

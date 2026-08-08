@@ -11,6 +11,7 @@
 | [`run_e2e_05.py`](./run_e2e_05.py) | E2E-05 Diet plan → groceries journey (also invoked by test:ci) |
 | [`run_e2e_06.py`](./run_e2e_06.py) | E2E-06 Booksy propose → approve → book (also invoked by test:ci; T5) |
 | [`run_e2e_07.py`](./run_e2e_07.py) | E2E-07 Shopping with cap / freeze (+ deny; also invoked by test:ci; T6) |
+| [`run_e2e_08.py`](./run_e2e_08.py) | E2E-08 Self-mod patch accept + deny (also invoked by test:ci; T7) |
 | [`run_e2e_09.py`](./run_e2e_09.py) | E2E-09 Ignored hard approval expiry (also invoked by test:ci) |
 | [`backup-restore-placeholder.sh`](./backup-restore-placeholder.sh) | Documented backup/restore paths (no cloud in CI) |
 
@@ -26,6 +27,7 @@ make e2e-04                          # E2E-04 alone
 make e2e-05                          # E2E-05 alone
 make e2e-06                          # E2E-06 alone (Booksy; T5)
 make e2e-07                          # E2E-07 alone (shopping cap/freeze; T6)
+make e2e-08                          # E2E-08 alone (self-mod accept+deny; T7)
 make e2e-09                          # E2E-09 alone (hard approval expiry)
 ```
 

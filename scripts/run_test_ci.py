@@ -41,6 +41,7 @@ from harness.virtual_user import (  # noqa: E402
     run_e2e_05_structure,
     run_e2e_06,
     run_e2e_07,
+    run_e2e_08,
     run_e2e_09,
     run_t2_approval_inbox,
 )
@@ -469,6 +470,23 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
             }
         )
 
+    e2e08_dir = ROOT / "artifacts" / "test" / "e2e-08"
+    journey08 = run_e2e_08(
+        root=ROOT,
+        artifacts_dir=e2e08_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey08.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": True,
+                "flow": "E2E-08",
+            }
+        )
+
     e2e09_dir = ROOT / "artifacts" / "test" / "e2e-09"
     journey09 = run_e2e_09(
         root=ROOT,
@@ -497,6 +515,7 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         and journey05.ok
         and journey06.ok
         and journey07.ok
+        and journey08.ok
         and journey09.ok
         else "FAIL"
     )
@@ -514,6 +533,7 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
                 "E2E-05",
                 "E2E-06",
                 "E2E-07",
+                "E2E-08",
                 "E2E-09",
             ],
             "e2e_01_artifacts": "artifacts/test/e2e-01/",
@@ -523,10 +543,12 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
             "e2e_05_artifacts": "artifacts/test/e2e-05/",
             "e2e_06_artifacts": "artifacts/test/e2e-06/",
             "e2e_07_artifacts": "artifacts/test/e2e-07/",
+            "e2e_08_artifacts": "artifacts/test/e2e-08/",
             "e2e_09_artifacts": "artifacts/test/e2e-09/",
             "t4_exit": journey02.ok,
             "t5_exit": journey06.ok,
             "t6_exit": journey07.ok,
+            "t7_exit": journey08.ok,
             "harness": "VirtualUser",
         },
     )
@@ -542,6 +564,7 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
             "E2E-05",
             "E2E-06",
             "E2E-07",
+            "E2E-08",
             "E2E-09",
         ],
     }
@@ -3866,6 +3889,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/e2e-05/",
                     "artifacts/test/e2e-06/",
                     "artifacts/test/e2e-07/",
+                    "artifacts/test/e2e-08/",
                     "artifacts/test/e2e-09/",
                     "artifacts/test/task-03/",
                     "artifacts/test/task-04/",
@@ -3884,6 +3908,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-21/",
                     "artifacts/test/task-22/",
                     "artifacts/test/task-23/",
+                    "artifacts/test/task-24/",
                 ],
             },
         },
@@ -3900,7 +3925,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "E2E-06 propose→approve→book (+ deny) + E2E-09 expiry (T5) + "
             "TASK-21 shopping dry-run + spend caps/freeze (INV-PAY-001/002) + "
             "E2E-07 shopping cap/freeze (+ deny gate; T6) + "
-            "TASK-23 self-mod allowlist + hard-approve apply (INV-SELF-001..004): "
+            "TASK-23 self-mod allowlist + hard-approve apply (INV-SELF-001..004) + "
+            "E2E-08 self-mod accept+deny gate (T7): "
             "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
             "Android projection equality; calendar soft-confirm (INV-APPR-003); "
             "diet plan with banned-ingredient absence + grocery todos; "
@@ -3913,8 +3939,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "approval execute; cap breach → spend_cap_* rejection artifact; "
             "E2E-07 deny path leaves buy_count=0; "
             "self-mod propose leaves tree clean; Accept applies with rollback_ref + "
-            "audit; Deny/freeze/outside-allowlist/secrets fail closed; "
-            "policy-change subtype for safety code; "
+            "audit; Deny leaves working tree unchanged (gate); freeze/outside/"
+            "secrets fail closed; policy-change subtype for safety code; "
             "fail-closed on broken INV"
         ),
         "result": overall,
@@ -3933,6 +3959,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/e2e-05/verification.json",
             "artifacts/test/e2e-06/verification.json",
             "artifacts/test/e2e-07/verification.json",
+            "artifacts/test/e2e-08/verification.json",
             "artifacts/test/e2e-09/verification.json",
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
@@ -3951,6 +3978,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-21/verification.json",
             "artifacts/test/task-22/verification.json",
             "artifacts/test/task-23/verification.json",
+            "artifacts/test/task-24/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -3966,11 +3994,14 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "E2E-05",
             "E2E-06",
             "E2E-07",
+            "E2E-08",
             "E2E-09",
         ],
         "t5_exit": overall == "PASS" and not broken,
         "t6_exit": overall == "PASS" and not broken,
+        "t7_exit": overall == "PASS" and not broken,
         "e2e07_ready": overall == "PASS" and not broken,
+        "e2e08_ready": overall == "PASS" and not broken,
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",
@@ -6366,6 +6397,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "make e2e-05",
                         "make e2e-06",
                         "make e2e-07",
+                        "make e2e-08",
                         "make e2e-09",
                     ],
                     "artifacts": [
@@ -6377,6 +6409,129 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-23/workspace-status.json",
                         "artifacts/test/task-23/outbound-messages.json",
                         "artifacts/test/task-23/diffs/quiet-hours.patch",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-24 E2E-08 Self-mod patch accept + deny — T7 exit.
+    # Fail-closed must not stomp happy-path task-24 / e2e-08 verification.
+    e2e08_checks = [
+        c
+        for L in layers
+        if L["layer"] == "e2e"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("e2e-08.")
+    ]
+    self_invs_t24 = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-SELF-")
+    ]
+    task24_pass = (
+        bool(e2e08_checks)
+        and all(c.get("result") == "PASS" for c in e2e08_checks if c.get("gate", True))
+        and bool(self_invs_t24)
+        and all(c.get("result") == "PASS" for c in self_invs_t24)
+    )
+    if not broken:
+        task24 = ROOT / "artifacts" / "test" / "task-24"
+        task24.mkdir(parents=True, exist_ok=True)
+        journey08 = run_e2e_08(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "e2e-08",
+            write_artifacts=True,
+        )
+        t7_exit = journey08.ok and task24_pass
+        write_report(
+            task24,
+            layer="task-24",
+            result="PASS" if t7_exit else "FAIL",
+            checks=e2e08_checks + self_invs_t24,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-08",
+                "gate": True,
+                "t7_exit": t7_exit,
+                "accept_approval_id": journey08.accept_approval_id,
+                "deny_approval_id": journey08.deny_approval_id,
+                "apply_count_after_accept": journey08.apply_count_after_accept,
+                "apply_count_after_deny": journey08.apply_count_after_deny,
+                "rollback_ref": journey08.rollback_ref,
+                "commit_sha": journey08.commit_sha,
+                "branch": journey08.branch,
+                "tree_clean_after_propose": journey08.tree_clean_after_propose,
+                "tree_clean_after_deny": journey08.tree_clean_after_deny,
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-08",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-24/",
+                },
+            },
+        )
+        (task24 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "TASK-24 / T7 exit: E2E-08 Self-mod patch gated green "
+                        "(quiet-hours propose on allowlisted path; apply tools "
+                        "unavailable until Accept; Accept → patch applied with "
+                        "rollback_ref + audit approval id; Deny leaves working "
+                        "tree unchanged); INV-SELF-001..004 intact"
+                    ),
+                    "result": "PASS" if t7_exit else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-08",
+                    "gate": True,
+                    "t7_exit": t7_exit,
+                    "e2e08_result": journey08.result,
+                    "accept_approval_id": journey08.accept_approval_id,
+                    "deny_approval_id": journey08.deny_approval_id,
+                    "apply_count_after_accept": journey08.apply_count_after_accept,
+                    "apply_count_after_deny": journey08.apply_count_after_deny,
+                    "rollback_ref": journey08.rollback_ref,
+                    "commit_sha": journey08.commit_sha,
+                    "branch": journey08.branch,
+                    "tree_clean_after_propose": journey08.tree_clean_after_propose,
+                    "tree_clean_after_deny": journey08.tree_clean_after_deny,
+                    "checks": [c.get("id") for c in e2e08_checks + self_invs_t24],
+                    "invariants": [
+                        "INV-SELF-001",
+                        "INV-SELF-002",
+                        "INV-SELF-003",
+                        "INV-SELF-004",
+                    ],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-08",
+                        "python3 scripts/run_e2e_08.py",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-24/report.json",
+                        "artifacts/test/task-24/verification.json",
+                        "artifacts/test/e2e-08/verification.json",
+                        "artifacts/test/e2e-08/proposals.json",
+                        "artifacts/test/e2e-08/approvals.json",
+                        "artifacts/test/e2e-08/audit.json",
+                        "artifacts/test/e2e-08/workspace-status.json",
+                        "artifacts/test/e2e-08/outbound-messages.json",
+                        "artifacts/test/e2e-08/diffs/quiet-hours.patch",
                     ],
                 },
                 indent=2,

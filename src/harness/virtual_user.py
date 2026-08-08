@@ -29,6 +29,8 @@ from capabilities.reminders.parse import parse_reminder
 from capabilities.reminders.scheduler import ReminderScheduler
 from capabilities.reminders.service import ReminderService
 from capabilities.reminders.store import EscalationChannel, ReminderStore
+from capabilities.selfmod.parse import EXPECTED_E2E08_UTTERANCE, looks_like_self_mod
+from capabilities.selfmod.service import ProposeSelfModResult, SelfModService
 from capabilities.shopping.parse import EXPECTED_E2E07_UTTERANCE, looks_like_shopping
 from capabilities.shopping.service import ProposePurchaseResult, ShoppingService
 from capabilities.shopping.store import PurchaseStatus, PurchaseStore
@@ -230,6 +232,28 @@ class E2E07Result:
 
 
 @dataclass
+class E2E08Result:
+    """Machine-check result for E2E-08 Self-mod patch (+ deny; T7)."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    accept_approval_id: Optional[str]
+    deny_approval_id: Optional[str]
+    apply_count_after_accept: int
+    apply_count_after_deny: int
+    rollback_ref: Optional[str]
+    commit_sha: Optional[str]
+    branch: Optional[str]
+    tree_clean_after_propose: bool
+    tree_clean_after_deny: bool
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
 class E2E09Result:
     """Machine-check result for E2E-09 ignored hard approval expiry."""
 
@@ -282,6 +306,7 @@ class VirtualUser:
     booking_store: BookingStore
     shopping: ShoppingService
     purchase_store: PurchaseStore
+    selfmod: SelfModService
     memory: MemoryStore
     android: AndroidProjectionApi
     android_inbox: AndroidApprovalInboxApi
@@ -293,6 +318,7 @@ class VirtualUser:
     last_calendar_propose: Optional[ProposeCalendarResult] = None
     last_booking_propose: Optional[ProposeBookingResult] = None
     last_shopping_propose: Optional[ProposePurchaseResult] = None
+    last_selfmod_propose: Optional[ProposeSelfModResult] = None
     last_plan_meals: Optional[PlanMealsResult] = None
     last_accept: Optional[AcceptResult] = None
     last_deny: Optional[ApprovalProjection] = None
@@ -383,6 +409,14 @@ class VirtualUser:
             caps_config=repo / "config" / "shopping.harness.json",
             usual_from_profile=usual,
         )
+        selfmod = SelfModService(
+            clock=clock,
+            catcher=catcher,
+            gateway=gateway,
+            recipient=owner,
+            workspace_fixture=repo / "fixtures" / "selfmod" / "sample-workspace",
+            allowlist_path=repo / "fixtures" / "selfmod" / "allowlist.json",
+        )
         android = AndroidProjectionApi(
             store=todo_store,
             clock=clock,
@@ -408,6 +442,7 @@ class VirtualUser:
             booking_store=booking_store,
             shopping=shopping,
             purchase_store=purchase_store,
+            selfmod=selfmod,
             memory=memory,
             android=android,
             android_inbox=android_inbox,
@@ -551,6 +586,38 @@ class VirtualUser:
             transport._send_outbound(
                 decision.normalized_sender or msg.sender,
                 f"Could not propose purchase: {proposed.reason}",
+                kind="clarification",
+            )
+            return tools
+
+        if looks_like_self_mod(body):
+            # Hard approve — never apply until Accept (INV-SELF / propose-only).
+            if tier_for("self_mod_apply") != ApprovalTier.HARD_APPROVE:
+                transport._record_tool("agent.clarify")
+                transport._send_outbound(
+                    decision.normalized_sender or msg.sender,
+                    "Self-mod apply is not Hard approve — refusing.",
+                    kind="clarification",
+                )
+                return ["agent.clarify"]
+
+            transport._record_tool("self_mod_propose")
+            proposed = self.selfmod.propose_from_utterance(
+                body,
+                recipient=self.owner,
+                source_channel="whatsapp",
+            )
+            self.last_selfmod_propose = proposed
+            tools = ["self_mod_propose"]
+            if proposed.ok and proposed.approval_id:
+                transport.counters.outbound_sends += 1
+                return tools
+
+            transport._record_tool("agent.clarify")
+            tools.append("agent.clarify")
+            transport._send_outbound(
+                decision.normalized_sender or msg.sender,
+                f"Could not propose self-mod: {proposed.reason}",
                 kind="clarification",
             )
             return tools
@@ -814,6 +881,22 @@ class VirtualUser:
         self.last_shopping_propose = result
         return result
 
+    def apply_count(self) -> int:
+        return self.gateway.selfmod.apply_count
+
+    def selfmod_from_utterance(self, utterance: str) -> ProposeSelfModResult:
+        """NL path for E2E-08: quiet hours → pending hard approve (apply_count=0)."""
+        result = self.selfmod.propose_from_utterance(
+            utterance,
+            recipient=self.owner,
+            source_channel="whatsapp",
+        )
+        self.last_selfmod_propose = result
+        return result
+
+    def working_tree_clean(self) -> bool:
+        return self.selfmod.workspace.working_tree_clean()
+
     def todos_list(self) -> list[Any]:
         return list(self.todo_store.list_all())
 
@@ -832,6 +915,8 @@ class VirtualUser:
                 "booking_confirm",
                 "shopping_propose",
                 "shopping_receipt",
+                "selfmod_propose",
+                "selfmod_applied",
             }
         ]
 
@@ -860,6 +945,13 @@ class VirtualUser:
                 "tasks": self.purchase_store.to_dict(),
                 "spend": self.gateway.spend.snapshot(),
                 "rejections": list(self.gateway.execute_rejections),
+            },
+            "selfmod": {
+                "apply_count": self.gateway.selfmod.apply_count,
+                "policy_change_count": self.gateway.selfmod.policy_change_count,
+                "tree_clean": self.selfmod.workspace.working_tree_clean(),
+                "tools": self.selfmod.tools_for_session(),
+                "workspace": self.selfmod.workspace.status(),
             },
             "outbound": self.catcher.to_list(),
             "approvals_pending": [a.id for a in self.pending_approvals()],
@@ -890,6 +982,17 @@ class VirtualUser:
                     "reason": self.last_shopping_propose.reason,
                 }
                 if self.last_shopping_propose
+                else None
+            ),
+            "last_selfmod": (
+                {
+                    "approval_id": self.last_selfmod_propose.approval_id,
+                    "proposal_id": self.last_selfmod_propose.proposal_id,
+                    "files": self.last_selfmod_propose.files_touched,
+                    "rollback_ref": self.last_selfmod_propose.rollback_ref,
+                    "reason": self.last_selfmod_propose.reason,
+                }
+                if self.last_selfmod_propose
                 else None
             ),
         }
@@ -3189,6 +3292,384 @@ def run_e2e_07(
                     "proposed_price": proposed.price if proposed else None,
                     "freeze_reason": freeze_reason,
                     "cap_reason": cap_reason,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    return result
+
+
+def run_e2e_08(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E08Result:
+    """E2E-08 — Self-mod patch accept + deny (gate-tagged; T7).
+
+    Spec (agent-plan/testing/e2e-flows.md):
+      1. “Add quiet hours: no calls after 22:00.”
+      2. Agent proposes diff on allowlisted path.
+      3. Apply tools unavailable until Accept.
+      4. Accept → patch applied on branch; audit has approval id; rollback_ref.
+      5. Deny variant → working tree unchanged.
+
+    Checks: INV-SELF-*; rollback ref present. Gate deny path for merge.
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-08")
+    checks: list[dict[str, Any]] = []
+    utterance = EXPECTED_E2E08_UTTERANCE
+
+    # --- Accept path ---
+    vu = VirtualUser.bootstrap(root=repo)
+    tools_before = vu.selfmod.tools_for_session()
+    turn = vu.inject_text(utterance)
+    proposed = vu.last_selfmod_propose
+    tree_after_propose = vu.working_tree_clean()
+    apply_tools_ok = (
+        tools_before.get("self_mod_apply") is False
+        and vu.selfmod.apply_tools_available is False
+        and (proposed is None or proposed.apply_available is False)
+    )
+    propose_ok = (
+        turn.allowed
+        and "self_mod_propose" in turn.tool_calls
+        and proposed is not None
+        and proposed.ok
+        and proposed.approval_id is not None
+        and proposed.tier == ApprovalTier.HARD_APPROVE.value
+        and proposed.action_type == "self_mod_apply"
+        and proposed.files_touched
+        and all(
+            p.startswith(("skills/", "config/")) for p in proposed.files_touched
+        )
+        and tree_after_propose
+        and vu.apply_count() == 0
+        and proposed.rollback_ref is not None
+        and apply_tools_ok
+    )
+    checks.append(
+        {
+            "id": "e2e-08.propose_allowlisted_tree_clean",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} ok={getattr(proposed, 'ok', None)} "
+                f"files={getattr(proposed, 'files_touched', None)} "
+                f"clean={tree_after_propose} apply={vu.apply_count()} "
+                f"apply_avail={getattr(proposed, 'apply_available', None)} "
+                f"rollback={getattr(proposed, 'rollback_ref', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    pending = vu.list_android_approvals()
+    pending_ok = (
+        len(pending) == 1
+        and proposed is not None
+        and proposed.approval_id is not None
+        and pending[0].id == proposed.approval_id
+        and pending[0].action_type == "self_mod_apply"
+        and pending[0].status == ApprovalStatus.PENDING.value
+        and vu.apply_count() == 0
+        and vu.selfmod.tools_for_session().get("self_mod_apply") is False
+    )
+    checks.append(
+        {
+            "id": "e2e-08.apply_unavailable_until_accept",
+            "result": "PASS" if pending_ok else "FAIL",
+            "detail": (
+                f"pending={len(pending)} apply={vu.apply_count()} "
+                f"tools={vu.selfmod.tools_for_session()} "
+                f"action={pending[0].action_type if pending else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    accepted = (
+        vu.accept_approval(proposed.approval_id)
+        if proposed and proposed.approval_id
+        else None
+    )
+    apply_after_accept = vu.apply_count()
+    exec_result = (
+        accepted.execute.result
+        if accepted and accepted.execute and isinstance(accepted.execute.result, dict)
+        else {}
+    )
+    audits = (
+        vu.gateway.audit.for_approval(proposed.approval_id)
+        if proposed and proposed.approval_id
+        else []
+    )
+    reminders_after = ""
+    try:
+        reminders_after = vu.selfmod.workspace.read("skills/reminders.md")
+    except Exception:  # noqa: BLE001
+        reminders_after = ""
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and accepted.approval.status == ApprovalStatus.EXECUTED.value
+        and apply_after_accept == 1
+        and bool(exec_result.get("rollback_ref"))
+        and exec_result.get("rollback_ref") == (proposed.rollback_ref if proposed else None)
+        and bool(exec_result.get("commit_sha"))
+        and str(exec_result.get("branch", "")).startswith("cursor/agent-self-")
+        and any(a.success and a.approval_id == proposed.approval_id for a in audits)
+        and "enabled: true" in reminders_after
+        and 'start: "22:00"' in reminders_after
+        and any(m.meta.get("kind") == "selfmod_applied" for m in vu.catcher.messages)
+        and len(vu.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-08.accept_applies_with_rollback_audit",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} apply={apply_after_accept} "
+                f"rollback={exec_result.get('rollback_ref')} "
+                f"commit={exec_result.get('commit_sha')} "
+                f"branch={exec_result.get('branch')} audits={len(audits)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Deny path (merge gate) ---
+    vu_deny = VirtualUser.bootstrap(root=repo)
+    deny_turn = vu_deny.inject_text(utterance)
+    denied_prop = vu_deny.last_selfmod_propose
+    apply_before_deny = vu_deny.apply_count()
+    tree_before_deny = vu_deny.working_tree_clean()
+    reminders_before = vu_deny.selfmod.workspace.read("skills/reminders.md")
+    denied = (
+        vu_deny.deny_approval(denied_prop.approval_id)
+        if denied_prop and denied_prop.approval_id
+        else None
+    )
+    apply_after_deny = vu_deny.apply_count()
+    tree_after_deny = vu_deny.working_tree_clean()
+    reminders_deny = vu_deny.selfmod.workspace.read("skills/reminders.md")
+    late_exec = (
+        vu_deny.gateway.execute(denied_prop.approval_id)
+        if denied_prop and denied_prop.approval_id
+        else None
+    )
+    deny_ok = (
+        deny_turn.allowed
+        and "self_mod_propose" in deny_turn.tool_calls
+        and denied_prop is not None
+        and denied_prop.ok
+        and denied_prop.approval_id is not None
+        and apply_before_deny == 0
+        and tree_before_deny
+        and denied is not None
+        and denied.status == ApprovalStatus.DENIED.value
+        and apply_after_deny == 0
+        and tree_after_deny
+        and reminders_deny == reminders_before
+        and "enabled: false" in reminders_deny
+        and late_exec is not None
+        and (not late_exec.ok)
+        and len(vu_deny.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-08.deny_leaves_tree_unchanged",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"deny_status={denied.status if denied else None} "
+                f"apply_before={apply_before_deny} apply_after={apply_after_deny} "
+                f"clean={tree_after_deny} late={getattr(late_exec, 'reason', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = E2E08Result(
+        result=overall,
+        checks=checks,
+        accept_approval_id=proposed.approval_id if proposed else None,
+        deny_approval_id=denied_prop.approval_id if denied_prop else None,
+        apply_count_after_accept=apply_after_accept,
+        apply_count_after_deny=apply_after_deny,
+        rollback_ref=str(exec_result.get("rollback_ref") or "") or (
+            proposed.rollback_ref if proposed else None
+        ),
+        commit_sha=str(exec_result.get("commit_sha") or "") or None,
+        branch=str(exec_result.get("branch") or "") or None,
+        tree_clean_after_propose=tree_after_propose,
+        tree_clean_after_deny=tree_after_deny,
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        diffs = out / "diffs"
+        diffs.mkdir(parents=True, exist_ok=True)
+        if proposed and proposed.diff_text:
+            (diffs / "quiet-hours.patch").write_text(
+                proposed.diff_text + ("\n" if not proposed.diff_text.endswith("\n") else ""),
+                encoding="utf-8",
+            )
+        vu.catcher.write_json(out / "outbound-messages.json")
+        (out / "workspace-status.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": {
+                        "at_propose": {
+                            "tree_clean": tree_after_propose,
+                            "apply_count": 0,
+                            "tools": tools_before,
+                        },
+                        "after_accept": vu.selfmod.workspace.status(),
+                        "apply_count": apply_after_accept,
+                        "reminders_excerpt": reminders_after[:400],
+                    },
+                    "deny_path": {
+                        "tree_clean": tree_after_deny,
+                        "apply_count": apply_after_deny,
+                        "workspace": vu_deny.selfmod.workspace.status(),
+                        "reminders_unchanged": reminders_deny == reminders_before,
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "proposals.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": proposed.to_dict() if proposed else None,
+                    "deny_path": denied_prop.to_dict() if denied_prop else None,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": vu.android_inbox.snapshot(),
+                    "deny_path": vu_deny.android_inbox.snapshot(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "audit.json").write_text(
+            json.dumps(
+                {
+                    "accept_audits": [a.to_dict() for a in audits] if audits else [],
+                    "apply_result": exec_result,
+                    "deny_late_execute_reason": getattr(late_exec, "reason", None),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            out,
+            layer="e2e-08",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-08",
+                "gate": True,
+                "utterance": utterance,
+                "accept_approval_id": proposed.approval_id if proposed else None,
+                "deny_approval_id": denied_prop.approval_id if denied_prop else None,
+                "apply_count_after_accept": apply_after_accept,
+                "apply_count_after_deny": apply_after_deny,
+                "rollback_ref": result.rollback_ref,
+                "commit_sha": result.commit_sha,
+                "branch": result.branch,
+                "t7_exit": overall == "PASS",
+                "invariants": [
+                    "INV-SELF-001",
+                    "INV-SELF-002",
+                    "INV-SELF-003",
+                    "INV-SELF-004",
+                ],
+                "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-08",
+                        "python3 scripts/run_e2e_08.py",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/e2e-08/",
+                },
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-08 Self-mod patch: WhatsApp "
+                        f"{utterance!r} proposes allowlisted quiet-hours diff "
+                        "with apply tools unavailable and tree clean; Accept → "
+                        "patch applied on cursor/agent-self-* with rollback_ref "
+                        "+ audit approval id; Deny leaves working tree unchanged "
+                        "(T7 exit / merge gate deny path)"
+                    ),
+                    "result": overall,
+                    "flow": "E2E-08",
+                    "gate": True,
+                    "t7_exit": overall == "PASS",
+                    "checks": [c["id"] for c in checks],
+                    "invariants": [
+                        "INV-SELF-001",
+                        "INV-SELF-002",
+                        "INV-SELF-003",
+                        "INV-SELF-004",
+                    ],
+                    "commands": [
+                        "python3 scripts/run_e2e_08.py",
+                        "make e2e-08",
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/e2e-08/report.json",
+                        "artifacts/test/e2e-08/verification.json",
+                        "artifacts/test/e2e-08/proposals.json",
+                        "artifacts/test/e2e-08/approvals.json",
+                        "artifacts/test/e2e-08/audit.json",
+                        "artifacts/test/e2e-08/workspace-status.json",
+                        "artifacts/test/e2e-08/outbound-messages.json",
+                        "artifacts/test/e2e-08/diffs/quiet-hours.patch",
+                    ],
+                    "accept_approval_id": proposed.approval_id if proposed else None,
+                    "deny_approval_id": denied_prop.approval_id if denied_prop else None,
+                    "apply_count_after_accept": apply_after_accept,
+                    "apply_count_after_deny": apply_after_deny,
+                    "rollback_ref": result.rollback_ref,
+                    "commit_sha": result.commit_sha,
+                    "branch": result.branch,
+                    "tree_clean_after_propose": tree_after_propose,
+                    "tree_clean_after_deny": tree_after_deny,
                 },
                 indent=2,
                 sort_keys=True,
