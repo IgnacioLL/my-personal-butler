@@ -4236,7 +4236,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "TASK-21 shopping dry-run + spend caps/freeze (INV-PAY-001/002) + "
             "E2E-07 shopping cap/freeze (+ deny gate; T6) + "
             "TASK-23 self-mod allowlist + hard-approve apply (INV-SELF-001..004) + "
-            "E2E-08 self-mod accept+deny gate (T7): "
+            "E2E-08 self-mod accept+deny gate (T7) + "
+            "TASK-25 heartbeat/quiet + soak/chaos + E2E-10 restart durability (T8): "
             "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
             "Android projection equality; calendar soft-confirm (INV-APPR-003); "
             "diet plan with banned-ingredient absence + grocery todos; "
@@ -4251,6 +4252,9 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "self-mod propose leaves tree clean; Accept applies with rollback_ref + "
             "audit; Deny leaves working tree unchanged (gate); freeze/outside/"
             "secrets fail closed; policy-change subtype for safety code; "
+            "pause/quiet suppress morning brief + weekly review; soak restart/"
+            "dup webhook/clock jump; stub-portal injection never auto-Accept; "
+            "E2E-10 pending purchase survives restart + Accept once; "
             "fail-closed on broken INV"
         ),
         "result": overall,
@@ -4271,6 +4275,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/e2e-07/verification.json",
             "artifacts/test/e2e-08/verification.json",
             "artifacts/test/e2e-09/verification.json",
+            "artifacts/test/e2e-10/verification.json",
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
             "artifacts/test/task-05/verification.json",
@@ -4289,6 +4294,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-22/verification.json",
             "artifacts/test/task-23/verification.json",
             "artifacts/test/task-24/verification.json",
+            "artifacts/test/task-25/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -4306,12 +4312,15 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "E2E-07",
             "E2E-08",
             "E2E-09",
+            "E2E-10",
         ],
         "t5_exit": overall == "PASS" and not broken,
         "t6_exit": overall == "PASS" and not broken,
         "t7_exit": overall == "PASS" and not broken,
+        "t8_exit": overall == "PASS" and not broken,
         "e2e07_ready": overall == "PASS" and not broken,
         "e2e08_ready": overall == "PASS" and not broken,
+        "e2e10_ready": overall == "PASS" and not broken,
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",

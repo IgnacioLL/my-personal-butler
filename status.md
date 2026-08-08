@@ -321,10 +321,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-08, TASK-12, TASK-14, TASK-22, TASK-24
 - **Model:** composer-2.5 (impl) + cursor-grok-4.5-high (soak/safety review)
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Morning brief / quiet policies; soak/chaos pack; restart durability E2E-10; harden injection defenses per Phase 8 roadmap.
 - **Acceptance:** T8 exit criteria; nightly-oriented packs documented.
-- **Result:** Agent A implement — `make test-ci` + `make test-ci-fail-closed` PASS; heartbeat morning brief + weekly review stubs respect `pause_agent` + quiet hours; soak/chaos (restart mid-approval, clock jump, duplicate webhook/message_id) in integration + `make soak-chaos`; E2E-10 gate green (pending buy → restart → Accept once); injection flagged on stub portal without bypassing Accept; INV-* intact.
+- **Result:** PASS (Agent B soak/safety review) — Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-10` exit 0, `make soak-chaos` exit 0, sample prior e2e (`e2e-01`/`08`) exit 0. Spot-checks: pause/quiet suppress morning brief + weekly review; restart → Accept once (`buy=1`, second execute/accept blocked); dup webhook → `duplicate_webhook` tools/outbound/pending once; stub-portal `APPROVE ALL` flags injection and leaves booking `pending` (`book=0`). Review fix: CI verification stamp now includes `E2E-10` in `gate_e2e` + `t8_exit`/`e2e10_ready` + task-25/e2e-10 artifact paths. Fail-closed does not stomp e2e-10/task-25 verification (`t8_exit=true`). INV-* intact (no weaken). **T8 exit PASS**.
 - **Artifacts:** `src/operations/heartbeat.py`, `src/policy/{quiet_hours,injection_guard}.py`, `scripts/{run_e2e_10,run_soak_chaos}.py`, `Makefile` (`e2e-10`, `soak-chaos`), `artifacts/test/task-25/`, `artifacts/test/e2e-10/`
 
 ### TASK-26 — CI gates wiring & component-matrix mapping
@@ -420,6 +420,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:44 | TASK-24 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-08/test-ci/fail-closed/sample e2e exit 0; accept-once/deny/INV-SELF spot-checks; T7 exit; status → done |
 | 2026-08-09 02:25 | TASK-25 | subagent-A | composer-2.5 | implement | Polish: heartbeat, soak, E2E-10 durability |
 | 2026-08-08 23:50 | TASK-25 | Agent A | composer-2.5 | implement | T8 polish complete — heartbeat/soak/E2E-10; status → review |
+| 2026-08-08 23:55 | TASK-25 | Agent B | cursor-grok-4.5-high | review | PASS — soak/e2e-10/spot-checks; CI t8_exit stamp fix; T8 exit; status → done |
 
 ---
 
@@ -442,5 +443,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-25 review (Agent B) + TASK-26 CI wiring.  
-**Next:** T8 exit sign-off after TASK-25 review.
+**Now:** TASK-26 CI wiring (post T8).  
+**Next:** Continuous CI gate tightening; optional limited live-smoke playbook.
