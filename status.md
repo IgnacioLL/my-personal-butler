@@ -57,11 +57,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Per `testing/roadmap.md` T0 + `harnesses-and-fixtures.md`: `test:ci` pipeline (unit/contract/integration stubs), artifact directory convention, fake clock, INV-* runner skeleton that **fails** on a deliberate broken invariant, outbound message catcher stub.
 - **Acceptance:** `test:ci` runs; deliberate broken INV fails CI; B verifies autonomy process checklist items for scaffolding.
-- **Result:** PASS (Agent A implement) — T0 harness scaffolding landed (stdlib Python, no new deps). `FakeClock` + outbound catcher + ingress allowlist stubs; INV runner discovers `INV-INGRESS-001/002` + `INV-T0-CLOCK`. Happy path: `make test-ci` / `./scripts/test-ci.sh` → exit 0, `artifacts/test/ci/report.json` PASS. Fail-closed: `./scripts/test-ci.sh --break-invariant` → exit 1 (broken allow-all); `make test-ci-fail-closed` proves rejection. OpenClaw-centric doubles only (not a custom runtime). Ready for Agent B review.
-- **Artifacts:** `src/harness/{clock,outbound,ingress_sim,inv_runner,artifacts}.py`, `src/policy/ingress.py`, `src/invariants/inv_ingress_00{1,2}.py`, `src/invariants/inv_t0_clock.py`, `scripts/run_test_ci.py`, `scripts/test-ci.sh`, `Makefile` (`test-ci`, `test-ci-fail-closed`), `artifacts/test/ci/` (runtime; gitignored), README Agent B re-run notes
+- **Result:** PASS (Agent B review) — T0 checklist verified by re-run: repo test scaffolding ✓ (`make test-ci` exit 0); artifacts under `artifacts/test/ci/` ✓ (`report.json`/`verification.json`/layer reports + outbound-messages); fake clock ✓; INV runner fails on deliberate broken INV ✓ (`--break-invariant` exit 1; `make test-ci-fail-closed` exit 0); WhatsApp allowlist contract stubs ✓ (`INV-INGRESS-001/002`); outbound catcher stub ✓. Review fix: `scripts/test-ci.sh` capture status under `set -e` so FAIL path still prints artifact hints. Ready for TASK-02/03.
+- **Artifacts:** `src/harness/{clock,outbound,ingress_sim,inv_runner,artifacts}.py`, `src/policy/ingress.py`, `src/invariants/inv_ingress_00{1,2}.py`, `src/invariants/inv_t0_clock.py`, `scripts/run_test_ci.py`, `scripts/test-ci.sh`, `Makefile` (`test-ci`, `test-ci-fail-closed`), `artifacts/test/ci/` (runtime; gitignored)
 
 ### TASK-02 — Trust core: approval matrix engine + kill switches
 - **Phase:** 0 (foundation for all gated work)
@@ -349,6 +349,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 21:52 | TASK-00 | Agent B | composer-2.5 | review | PASS — checklist verified; README make target fix; status → done |
 | 2026-08-08 21:53 | TASK-01 | subagent-A | cursor-grok-4.5-high | implement | T0 harness: fake clock, INV runner, fail-closed test:ci |
 | 2026-08-08 21:55 | TASK-01 | Agent A | cursor-grok-4.5-high | implement | T0 complete — test:ci + fail-closed proof; status → review |
+| 2026-08-08 21:51 | TASK-01 | Agent B | cursor-grok-4.5-high | review | PASS — fail-closed re-verified; test-ci.sh set -e status fix; status → done |
 
 ---
 
@@ -369,5 +370,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-01 review (T0 harness implement done — awaiting Agent B).  
-**Next:** TASK-01 Agent B review, then TASK-02/03/04 as deps allow.
+**Now:** TASK-01 done (T0 harness scaffolding + fail-closed verified).  
+**Next:** TASK-02 (trust/approvals), TASK-03 (WhatsApp ingress INV-INGRESS-*), TASK-04 (memory) as deps allow.

@@ -35,8 +35,11 @@ echo ""
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 echo "==> layers: unit → contract/INV-* → integration"
+# Capture exit under set -e so we still print FAIL + artifact paths.
+set +e
 python3 "$ROOT/scripts/run_test_ci.py" "${EXTRA[@]}"
 status=$?
+set -e
 
 echo ""
 if [[ "$status" -eq 0 ]]; then
