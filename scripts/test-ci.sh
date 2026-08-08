@@ -1,21 +1,49 @@
 #!/usr/bin/env bash
-# test:ci — CI entrypoint (T0 stub; TASK-01 fleshes out layers + INV-* runner).
+# test:ci — merge gate entrypoint (unit + contract/INV-* + integration stubs).
+# Fail-closed: invariant failures exit non-zero.
+#
+# Happy path:     ./scripts/test-ci.sh
+# Fail-closed:    ./scripts/test-ci.sh --break-invariant   # expect exit != 0
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "==> personal-agent test:ci (T0 stub)"
-echo "    repo: $ROOT"
-echo ""
-
-# Layer placeholders — TASK-01 will invoke real runners here.
-layers=(unit contract integration invariants)
-for layer in "${layers[@]}"; do
-  echo "  [skip] $layer — not wired yet (TASK-01)"
+BREAK=0
+EXTRA=()
+for arg in "$@"; do
+  case "$arg" in
+    --break-invariant)
+      BREAK=1
+      EXTRA+=(--break-invariant)
+      ;;
+    *)
+      EXTRA+=("$arg")
+      ;;
+  esac
 done
 
+echo "==> personal-agent test:ci"
+echo "    repo: $ROOT"
+if [[ "$BREAK" -eq 1 ]]; then
+  echo "    mode: BREAK INVARIANT (expect FAIL / non-zero exit)"
+else
+  echo "    mode: happy path (expect PASS)"
+fi
 echo ""
-echo "==> test:ci stub complete (exit 0)"
-echo "    Next: TASK-01 wires fake clock, artifact dirs, outbound catcher, INV-* fail-closed runner."
-exit 0
+
+export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
+
+echo "==> layers: unit → contract/INV-* → integration"
+python3 "$ROOT/scripts/run_test_ci.py" "${EXTRA[@]}"
+status=$?
+
+echo ""
+if [[ "$status" -eq 0 ]]; then
+  echo "==> test:ci PASS"
+else
+  echo "==> test:ci FAIL (fail-closed)"
+fi
+echo "    artifacts: artifacts/test/ci/report.json"
+echo "    Agent B re-run: see artifacts/test/ci/report.json → agent_b_rerun"
+exit "$status"

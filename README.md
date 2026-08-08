@@ -10,9 +10,14 @@ An always-on **OpenClaw Gateway**–centric personal agent: WhatsApp-first, voic
 .
 ├── agent-plan/          # Product + testing plan (source of truth for design)
 ├── config/              # Gateway + harness config placeholders (no secrets)
-├── src/                 # Custom OpenClaw skills/tools (extend Gateway primitives)
+├── src/
+│   ├── harness/         # Fake clock, outbound catcher, INV runner (CI doubles)
+│   ├── invariants/      # Discoverable INV-* contract checks
+│   ├── policy/          # Ingress allowlist helpers
+│   ├── skills/          # OpenClaw skills
+│   └── tools/           # Shared tool helpers
 ├── fixtures/            # Deterministic test inputs (audio, approvals, calendar, …)
-├── scripts/             # CI and dev helpers
+├── scripts/             # CI and dev helpers (`test:ci`)
 ├── artifacts/test/      # Machine-readable test outputs (gitignored except README)
 └── status.md            # Implementation tracker (planner-owned)
 ```
@@ -27,19 +32,25 @@ We **do not** ship a custom orchestration runtime. The OpenClaw Gateway is the c
 
 ## Running tests
 
-T0 scaffolding is in place; TASK-01 will add invariant runners, fake clock, and real gates.
+T0 harness scaffolding (TASK-01):
 
-**CI entrypoint (stub today):**
+| Command | Expectation |
+| --- | --- |
+| `./scripts/test-ci.sh` or `make test-ci` | **PASS** (exit 0) when invariants healthy |
+| `./scripts/test-ci.sh --break-invariant` | **FAIL** (exit ≠ 0) — deliberate broken allowlist |
+| `make test-ci-fail-closed` | **PASS** only if the broken mode fails (fail-closed proof) |
 
-```bash
-./scripts/test-ci.sh
-# or
-make test-ci
-```
+Layers run in order: **unit** → **contract/INV-*** → **integration** stubs. Artifacts land under `artifacts/test/ci/` (`report.json`, `report.md`, `verification.json`, per-layer dirs, `outbound-messages.json`).
 
-The stub exits successfully and prints which layers TASK-01 will wire (unit, contract, integration, INV-*). Once TASK-01 lands, `test:ci` must **fail closed** on broken invariants.
+### Agent B verification
 
-Test artifacts are written under `artifacts/test/<task-or-flow>/` per [`agent-plan/testing/harnesses-and-fixtures.md`](./agent-plan/testing/harnesses-and-fixtures.md).
+1. `git pull` on `cursor/status-and-delegate-c450`
+2. Happy path: `make test-ci` → exit 0; read `artifacts/test/ci/report.json` (`result: PASS`)
+3. Fail-closed: `make test-ci-fail-closed` → exit 0 of the make target (inner CI must have failed)
+4. Confirm `INV-INGRESS-001` / `INV-INGRESS-002` appear under contract checks
+5. Do not weaken invariants to go green
+
+Stdlib Python 3 only — no pip installs required for `test:ci`.
 
 ## Fixtures
 
