@@ -4,6 +4,10 @@
 - freeze spending — shopping execute blocked
 - freeze self-mod — source write/apply disabled
 - cancel pending — all pending approvals → cancelled (delegates to ApprovalStore)
+
+INV-PAY-001 policy (chosen): freeze spending blocks commerce execute even when a
+stale accepted approval exists. Approvals are NOT cancelled on freeze — the
+execute gate refuses with reason `freeze_spending` until unfrozen.
 """
 
 from __future__ import annotations

@@ -75,9 +75,14 @@ class BookingAdapterError(RuntimeError):
 
 @dataclass
 class StubCommerceAdapter:
-    """Buy / book execute counters — must stay 0 until Accept."""
+    """Buy / book execute counters — must stay 0 until Accept.
+
+    Buy is always dry-run in harness (no live card charge). INV-PAY-*:
+    freeze/caps gate execute before this adapter is reached.
+    """
 
     buy_count: int = 0
+    buy_attempt_count: int = 0
     book_count: int = 0
     book_attempt_count: int = 0
     buys: list[dict[str, Any]] = field(default_factory=list)
@@ -85,10 +90,20 @@ class StubCommerceAdapter:
     book_failures: list[dict[str, Any]] = field(default_factory=list)
     fail_next_book: bool = False
     fail_book_message: str = "slot_unavailable"
+    dry_run: bool = True
 
     def buy(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Dry-run purchase. INV-PAY / hard-approve: only after Accept under caps."""
+        self.buy_attempt_count += 1
         self.buy_count += 1
-        receipt = {"receipt_id": f"buy-{self.buy_count}", **payload}
+        receipt = {
+            "receipt_id": f"buy-{self.buy_count}",
+            "dry_run": True if payload.get("dry_run", self.dry_run) else False,
+            "mode": "dry_run",
+            **payload,
+        }
+        receipt["dry_run"] = True
+        receipt["mode"] = "dry_run"
         self.buys.append(receipt)
         return receipt
 
@@ -113,6 +128,7 @@ class StubCommerceAdapter:
 
     def reset(self) -> None:
         self.buy_count = 0
+        self.buy_attempt_count = 0
         self.book_count = 0
         self.book_attempt_count = 0
         self.buys.clear()

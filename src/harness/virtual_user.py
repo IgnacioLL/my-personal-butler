@@ -29,6 +29,9 @@ from capabilities.reminders.parse import parse_reminder
 from capabilities.reminders.scheduler import ReminderScheduler
 from capabilities.reminders.service import ReminderService
 from capabilities.reminders.store import EscalationChannel, ReminderStore
+from capabilities.shopping.parse import looks_like_shopping
+from capabilities.shopping.service import ProposePurchaseResult, ShoppingService
+from capabilities.shopping.store import PurchaseStore
 from capabilities.todos.parse import looks_like_todo_add
 from capabilities.todos.service import TodoService
 from capabilities.todos.store import TodoStatus, TodoStore
@@ -252,6 +255,8 @@ class VirtualUser:
     diet: DietService
     bookings: BookingService
     booking_store: BookingStore
+    shopping: ShoppingService
+    purchase_store: PurchaseStore
     memory: MemoryStore
     android: AndroidProjectionApi
     android_inbox: AndroidApprovalInboxApi
@@ -262,6 +267,7 @@ class VirtualUser:
     last_soft_confirm: Optional[ProposeResult] = None
     last_calendar_propose: Optional[ProposeCalendarResult] = None
     last_booking_propose: Optional[ProposeBookingResult] = None
+    last_shopping_propose: Optional[ProposePurchaseResult] = None
     last_plan_meals: Optional[PlanMealsResult] = None
     last_accept: Optional[AcceptResult] = None
     last_deny: Optional[ApprovalProjection] = None
@@ -339,6 +345,19 @@ class VirtualUser:
             recipient=owner,
             portal_fixture=repo / "fixtures" / "browser" / "booksy-stub-slots.json",
         )
+        prefs = (seed.get("preferences") or {}) if isinstance(seed, dict) else {}
+        usual = dict(prefs.get("usual_purchases") or {})
+        purchase_store = PurchaseStore()
+        shopping = ShoppingService(
+            clock=clock,
+            catcher=catcher,
+            gateway=gateway,
+            store=purchase_store,
+            recipient=owner,
+            merchant_fixture=repo / "fixtures" / "shopping" / "merchant-catalog.json",
+            caps_config=repo / "config" / "shopping.harness.json",
+            usual_from_profile=usual,
+        )
         android = AndroidProjectionApi(
             store=todo_store,
             clock=clock,
@@ -362,6 +381,8 @@ class VirtualUser:
             diet=diet,
             bookings=bookings,
             booking_store=booking_store,
+            shopping=shopping,
+            purchase_store=purchase_store,
             memory=memory,
             android=android,
             android_inbox=android_inbox,
@@ -466,6 +487,45 @@ class VirtualUser:
             transport._send_outbound(
                 decision.normalized_sender or msg.sender,
                 f"Could not create todo: {created.reason}",
+                kind="clarification",
+            )
+            return tools
+
+        if looks_like_shopping(body):
+            # Hard approve — never buy until Accept (INV-PAY / propose-only).
+            if tier_for("buy") != ApprovalTier.HARD_APPROVE:
+                transport._record_tool("agent.clarify")
+                transport._send_outbound(
+                    decision.normalized_sender or msg.sender,
+                    "Purchase is not Hard approve — refusing.",
+                    kind="clarification",
+                )
+                return ["agent.clarify"]
+
+            transport._record_tool("buy_propose")
+            proposed = self.shopping.propose_from_utterance(
+                body,
+                recipient=self.owner,
+                source_channel="whatsapp",
+            )
+            self.last_shopping_propose = proposed
+            tools = ["buy_propose"]
+            if proposed.ok and proposed.approval_id:
+                transport.counters.outbound_sends += 1
+                if msg.media_type == "audio":
+                    spoken = transport.pipeline.maybe_tts_reply(
+                        proposed.confirm_body, inbound_was_audio=True
+                    )
+                    if spoken:
+                        transport.counters.tts_speaks += 1
+                        transport.last_tts_spoken = True
+                return tools
+
+            transport._record_tool("agent.clarify")
+            tools.append("agent.clarify")
+            transport._send_outbound(
+                decision.normalized_sender or msg.sender,
+                f"Could not propose purchase: {proposed.reason}",
                 kind="clarification",
             )
             return tools
@@ -716,6 +776,19 @@ class VirtualUser:
         self.last_booking_propose = result
         return result
 
+    def buy_count(self) -> int:
+        return self.gateway.commerce.buy_count
+
+    def buy_from_utterance(self, utterance: str) -> ProposePurchaseResult:
+        """NL path for E2E-07: Buy … → pending hard approve (buy_count=0)."""
+        result = self.shopping.propose_from_utterance(
+            utterance,
+            recipient=self.owner,
+            source_channel="whatsapp",
+        )
+        self.last_shopping_propose = result
+        return result
+
     def todos_list(self) -> list[Any]:
         return list(self.todo_store.list_all())
 
@@ -732,6 +805,8 @@ class VirtualUser:
                 "diet_plan",
                 "booking_propose",
                 "booking_confirm",
+                "shopping_propose",
+                "shopping_receipt",
             }
         ]
 
@@ -754,6 +829,13 @@ class VirtualUser:
                 "book_attempt_count": self.gateway.commerce.book_attempt_count,
                 "tasks": self.booking_store.to_dict(),
             },
+            "shopping": {
+                "buy_count": self.gateway.commerce.buy_count,
+                "buy_attempt_count": self.gateway.commerce.buy_attempt_count,
+                "tasks": self.purchase_store.to_dict(),
+                "spend": self.gateway.spend.snapshot(),
+                "rejections": list(self.gateway.execute_rejections),
+            },
             "outbound": self.catcher.to_list(),
             "approvals_pending": [a.id for a in self.pending_approvals()],
             "hard_approvals": [a.id for a in self.hard_approval_items()],
@@ -772,6 +854,17 @@ class VirtualUser:
                     "reason": self.last_booking_propose.reason,
                 }
                 if self.last_booking_propose
+                else None
+            ),
+            "last_shopping": (
+                {
+                    "approval_id": self.last_shopping_propose.approval_id,
+                    "task_id": self.last_shopping_propose.task_id,
+                    "price": self.last_shopping_propose.price,
+                    "sku": self.last_shopping_propose.sku,
+                    "reason": self.last_shopping_propose.reason,
+                }
+                if self.last_shopping_propose
                 else None
             ),
         }

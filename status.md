@@ -277,11 +277,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-02, TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Propose-only then hard execute; spend caps; freeze; receipts/audit; `INV-PAY-*`. Per `capabilities/shopping.md`.
 - **Acceptance:** Cap/freeze/deny paths proven.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Propose “Buy my usual protein powder.” → hard approve with price 29.99 EUR, `buy_count=0` until Accept. Accept under daily/weekly caps → dry-run merchant purchase + WhatsApp receipt + audit. **INV-PAY-001 policy:** freeze spending blocks execute even with stale accepted approval (approvals not cancelled). Over cap → `spend_cap_daily` rejection artifact. Deny → buy_count=0. `make test-ci` + `make test-ci-fail-closed` exit 0; fail-closed does not stomp task-21 verification. **E2E-07 ready** for TASK-22.
+- **Artifacts:** `src/capabilities/shopping/{parse,merchant,store,service}.py`, `src/policy/spend_caps.py`, `src/invariants/inv_pay_00{1,2}.py`, `src/policy/{action_gateway,kill_switches}.py`, `src/harness/{adapters,virtual_user}.py`, `fixtures/shopping/merchant-catalog.json`, `config/shopping.harness.json`, `scripts/run_test_ci.py`, `artifacts/test/task-21/`
 
 ### TASK-22 — E2E-07 Shopping with cap / freeze
 - **Phase:** 6 / T6
@@ -407,6 +407,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 01:30 | TASK-20 | Agent A | cursor-grok-4.5-high | implement | E2E-06 gate + E2E-09 expiry; T5 exit ready; status → review |
 | 2026-08-08 23:19 | TASK-20 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-06/09/test-ci/fail-closed/prior e2e exit 0; accept-once/deny-0/expiry spot-checks; T5 exit; status → done |
 | 2026-08-09 01:25 | TASK-21 | subagent-A | cursor-grok-4.5-high | implement | Shopping caps/freeze/dry-run + INV-PAY |
+| 2026-08-08 23:25 | TASK-21 | Agent A | cursor-grok-4.5-high | implement | Shopping dry-run + INV-PAY-001/002 + caps/freeze; status → review |
 
 ---
 
@@ -429,5 +430,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-20 done — **T5 exit PASS**.  
-**Next:** Phase 6 shopping (TASK-21+).
+**Now:** TASK-21 implement complete — shopping dry-run + INV-PAY-* → **review**.  
+**Next:** Agent B review TASK-21; then TASK-22 (E2E-07 gate / T6 exit).

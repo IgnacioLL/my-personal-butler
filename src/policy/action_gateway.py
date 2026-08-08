@@ -14,6 +14,7 @@ from typing import Any, Optional
 from capabilities.reminders.store import ReminderKind, ReminderStore
 from capabilities.todos.store import TodoSource, TodoStore
 from capabilities.bookings.store import BookingStore
+from capabilities.shopping.store import PurchaseStore
 from harness.adapters import (
     StubCalendarAdapter,
     StubCommerceAdapter,
@@ -33,6 +34,7 @@ from policy.approvals import (
 )
 from policy.audit import AuditLog
 from policy.kill_switches import KillSwitches
+from policy.spend_caps import SpendCapConfig, SpendLedger
 
 
 @dataclass
@@ -69,9 +71,12 @@ class ActionGateway:
     reminders: ReminderStore | None = None
     todos: TodoStore | None = None
     bookings: BookingStore | None = None
+    shopping: PurchaseStore | None = None
+    spend: SpendLedger = field(default_factory=SpendLedger)
     outbound: OutboundMessageCatcher | None = None
     cron: StubCronEmitter = field(init=False)
     execute_attempts: list[dict[str, Any]] = field(default_factory=list)
+    execute_rejections: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.approvals = ApprovalStore(self.clock, persist_path=self.approvals_path)
@@ -93,6 +98,20 @@ class ActionGateway:
         if outbound is not None:
             self.outbound = outbound
 
+    def attach_shopping(
+        self,
+        store: PurchaseStore,
+        *,
+        outbound: OutboundMessageCatcher | None = None,
+        spend_caps: SpendCapConfig | None = None,
+    ) -> None:
+        """Wire purchase task store, spend caps, and optional WhatsApp receipts."""
+        self.shopping = store
+        if outbound is not None:
+            self.outbound = outbound
+        if spend_caps is not None:
+            self.spend.config = spend_caps
+
     # --- Kill switches -------------------------------------------------
 
     def pause_agent(self) -> None:
@@ -102,7 +121,11 @@ class ActionGateway:
         self.kill.resume()
 
     def freeze_spending(self) -> None:
+        """INV-PAY-001: block buy execute; do not cancel stale accepted approvals."""
         self.kill.freeze_spending()
+
+    def unfreeze_spending(self) -> None:
+        self.kill.unfreeze_spending()
 
     def freeze_self_mod(self) -> None:
         self.kill.freeze_self_mod()
@@ -167,9 +190,11 @@ class ActionGateway:
 
     def deny(self, approval_id: str) -> Any:
         item = self.approvals.deny(approval_id)
-        # Keep booking task in sync with approval deny (Android inbox path).
+        # Keep booking/shopping tasks in sync with approval deny (Android inbox path).
         if item is not None and getattr(item, "action_type", None) == "book":
             self._mark_booking_denied(getattr(item, "payload", None) or {})
+        if item is not None and getattr(item, "action_type", None) == "buy":
+            self._mark_purchase_denied(getattr(item, "payload", None) or {})
         return item
 
     def edit(
@@ -215,15 +240,47 @@ class ActionGateway:
 
         blocked, block_reason = self.kill.blocks_execute(item.action_type)
         if blocked:
+            # INV-PAY-001: freeze blocks buy even with stale accepted approval.
+            self._record_execute_rejection(
+                approval_id=approval_id,
+                action_type=item.action_type,
+                reason=block_reason,
+                payload=item.payload,
+            )
+            if item.action_type == "buy":
+                self._mark_purchase_blocked(item.payload, block_reason)
             return ExecuteResult(
                 ok=False,
                 reason=block_reason,
                 approval_id=approval_id,
             )
 
+        # INV-PAY-002: spend cap breach blocks buy execute with clear rejection.
+        if item.action_type == "buy":
+            amount = self._buy_amount(item.payload, item.estimated_cost)
+            cap = self.spend.check(amount, now=self.clock.now())
+            if not cap.ok:
+                rejection = self._record_execute_rejection(
+                    approval_id=approval_id,
+                    action_type=item.action_type,
+                    reason=cap.reason,
+                    payload=item.payload,
+                    extra=cap.to_dict(),
+                )
+                self._mark_purchase_blocked(item.payload, cap.reason)
+                self.spend.record_rejection(rejection)
+                return ExecuteResult(
+                    ok=False,
+                    reason=cap.reason,
+                    approval_id=approval_id,
+                    result=rejection,
+                )
+
         try:
             adapter_result = self._run_adapter(item.action_type, item.payload)
             self.approvals.mark_executed(approval_id)
+            if item.action_type == "buy":
+                self._record_buy_spend(item.payload, adapter_result, approval_id)
             audit = self.audit.record(
                 item.action_type,
                 approval_id=approval_id,
@@ -241,6 +298,8 @@ class ActionGateway:
             # INV-BOOK-002: failed book must not leave user-facing success.
             if item.action_type == "book":
                 self._mark_booking_failed(item.payload, str(exc))
+            if item.action_type == "buy":
+                self._mark_purchase_failed(item.payload, str(exc))
             self.approvals.mark_failed(approval_id, str(exc))
             self.audit.record(
                 item.action_type,
@@ -291,7 +350,7 @@ class ActionGateway:
 
     def _run_adapter(self, action_type: str, payload: dict[str, Any]) -> Any:
         if action_type == "buy":
-            return self.commerce.buy(payload)
+            return self._execute_buy(payload)
         if action_type == "book":
             return self._execute_book(payload)
         if action_type == "self_mod_apply":
@@ -347,6 +406,131 @@ class ActionGateway:
             duration = int(payload.get("duration_minutes") or 45)
             resolved["end"] = (start_dt + timedelta(minutes=duration)).isoformat()
         return resolved
+
+    def _buy_amount(
+        self, payload: dict[str, Any], estimated_cost: float | None = None
+    ) -> float:
+        if payload.get("price") is not None:
+            return float(payload["price"])
+        if estimated_cost is not None:
+            return float(estimated_cost)
+        return 0.0
+
+    def _record_execute_rejection(
+        self,
+        *,
+        approval_id: str,
+        action_type: str,
+        reason: str,
+        payload: dict[str, Any],
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        detail: dict[str, Any] = {
+            "reason": reason,
+            "action_type": action_type,
+            "payload": dict(payload or {}),
+            "ts": self.clock.now().isoformat(),
+        }
+        if extra:
+            detail.update(extra)
+        row = {"approval_id": approval_id, **detail}
+        self.execute_rejections.append(row)
+        self.audit.record(
+            action_type,
+            approval_id=approval_id,
+            success=False,
+            detail={"rejection": detail},
+        )
+        return row
+
+    def _record_buy_spend(
+        self,
+        payload: dict[str, Any],
+        receipt: dict[str, Any],
+        approval_id: str,
+    ) -> None:
+        amount = self._buy_amount(payload)
+        self.spend.record(
+            amount,
+            now=self.clock.now(),
+            receipt_id=str(receipt.get("receipt_id") or ""),
+            approval_id=approval_id,
+            sku=str(payload.get("sku") or "") or None,
+            merchant=str(payload.get("merchant") or "") or None,
+        )
+
+    def _execute_buy(self, payload: dict[str, Any]) -> Any:
+        """Dry-run purchase after Accept: commerce.buy + receipt/outbound + store.
+
+        Caps and freeze are checked in execute() before this runs.
+        """
+        resolved = dict(payload)
+        resolved.setdefault("dry_run", True)
+        receipt = self.commerce.buy(resolved)
+
+        task_id = resolved.get("purchase_task_id")
+        if self.shopping is not None and task_id:
+            self.shopping.mark_purchased(
+                str(task_id),
+                receipt_id=str(receipt.get("receipt_id")),
+                at=self.clock.now(),
+                receipt=receipt,
+            )
+
+        if self.outbound is not None:
+            price = resolved.get("price")
+            currency = resolved.get("currency") or ""
+            name = resolved.get("name") or resolved.get("sku") or "item"
+            merchant = resolved.get("merchant") or "merchant"
+            price_bit = f" ({price:g} {currency})" if price is not None else ""
+            body = (
+                f"Receipt (dry-run): {name} at {merchant}{price_bit}. "
+                f"Confirmation {receipt.get('receipt_id')}."
+            )
+            self.outbound.send(
+                "whatsapp",
+                str(resolved.get("recipient") or "owner"),
+                body,
+                ts=self.clock.now(),
+                kind="shopping_receipt",
+                approval_id=None,
+                receipt_id=receipt.get("receipt_id"),
+                purchase_task_id=task_id,
+                dry_run=True,
+                price=price,
+                currency=currency,
+                merchant=merchant,
+                sku=resolved.get("sku"),
+            )
+
+        return receipt
+
+    def _mark_purchase_denied(self, payload: dict[str, Any]) -> None:
+        task_id = (payload or {}).get("purchase_task_id")
+        if self.shopping is None or not task_id:
+            return
+        try:
+            self.shopping.mark_denied(str(task_id), at=self.clock.now())
+        except KeyError:
+            return
+
+    def _mark_purchase_failed(self, payload: dict[str, Any], error: str) -> None:
+        task_id = (payload or {}).get("purchase_task_id")
+        if self.shopping is None or not task_id:
+            return
+        try:
+            self.shopping.mark_failed(str(task_id), error, at=self.clock.now())
+        except KeyError:
+            return
+
+    def _mark_purchase_blocked(self, payload: dict[str, Any], reason: str) -> None:
+        task_id = (payload or {}).get("purchase_task_id")
+        if self.shopping is None or not task_id:
+            return
+        try:
+            self.shopping.mark_blocked(str(task_id), reason, at=self.clock.now())
+        except KeyError:
+            return
 
     def _execute_book(self, payload: dict[str, Any]) -> Any:
         """Book after Accept: portal execute + calendar writeback + WhatsApp confirm.

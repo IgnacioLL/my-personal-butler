@@ -81,6 +81,14 @@ from capabilities.diet.constraints import banned_terms, check_meal_plan, text_vi
 from capabilities.diet.parse import looks_like_meal_plan, parse_meal_plan_request  # noqa: E402
 from capabilities.diet.planner import build_meal_plan, schedule_hints  # noqa: E402
 from capabilities.diet.service import DietService  # noqa: E402
+from capabilities.shopping.merchant import DryRunMerchant  # noqa: E402
+from capabilities.shopping.parse import (  # noqa: E402
+    EXPECTED_E2E07_UTTERANCE,
+    looks_like_shopping,
+    parse_shopping,
+)
+from capabilities.shopping.service import ShoppingService  # noqa: E402
+from capabilities.shopping.store import PurchaseStatus  # noqa: E402
 from capabilities.todos.parse import looks_like_todo_add, parse_todo  # noqa: E402
 from capabilities.todos.service import TodoService  # noqa: E402
 from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normalize_title  # noqa: E402
@@ -95,6 +103,7 @@ from channels.voice.allowlist import (  # noqa: E402
 )
 from channels.voice.provider import MockVoiceProvider  # noqa: E402
 from capabilities.reminders.escalation import EscalationLadder  # noqa: E402
+from policy.spend_caps import SpendCapConfig, SpendLedger  # noqa: E402
 
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
@@ -283,6 +292,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_calendar_unit_checks(ROOT))
     checks.extend(_run_diet_unit_checks(ROOT))
     checks.extend(_run_booking_unit_checks(ROOT))
+    checks.extend(_run_shopping_unit_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -597,6 +607,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_calendar_integration_checks(ROOT))
     checks.extend(_run_diet_integration_checks(ROOT))
     checks.extend(_run_booking_integration_checks(ROOT))
+    checks.extend(_run_shopping_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -2455,6 +2466,347 @@ def _run_booking_integration_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
+def _run_shopping_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Spend-cap math, NL parse, dry-run merchant catalog, hard-approve tier."""
+    checks: list[dict[str, Any]] = []
+
+    parse_ok = looks_like_shopping(EXPECTED_E2E07_UTTERANCE)
+    parsed = parse_shopping(EXPECTED_E2E07_UTTERANCE)
+    parse_detail_ok = (
+        parse_ok
+        and parsed.item_key == "protein_powder"
+        and parsed.prefer_usual
+        and not looks_like_shopping("Add todo: buy oat milk")
+        and not looks_like_shopping("Remind me to buy milk")
+    )
+    checks.append(
+        {
+            "id": "unit.shopping.parse_e2e07_utterance",
+            "result": "PASS" if parse_detail_ok else "FAIL",
+            "detail": (
+                f"item_key={parsed.item_key} prefer_usual={parsed.prefer_usual} "
+                f"looks={parse_ok}"
+            ),
+        }
+    )
+
+    merchant = DryRunMerchant.from_fixture(
+        root / "fixtures" / "shopping" / "merchant-catalog.json"
+    )
+    hits = merchant.search(
+        query="protein powder", item_key="protein_powder", prefer_usual=True, limit=3
+    )
+    usual = merchant.find_usual("protein_powder")
+    merchant_ok = (
+        merchant.merchant == "StubMart"
+        and usual is not None
+        and usual.sku == "prot-whey-2kg"
+        and usual.price == 29.99
+        and len(hits) >= 1
+        and hits[0].sku == "prot-whey-2kg"
+        and merchant.search_count == 1
+    )
+    checks.append(
+        {
+            "id": "unit.shopping.dry_run_merchant_catalog",
+            "result": "PASS" if merchant_ok else "FAIL",
+            "detail": (
+                f"merchant={merchant.merchant} usual_sku={usual.sku if usual else None} "
+                f"price={usual.price if usual else None} hits={len(hits)}"
+            ),
+        }
+    )
+
+    caps = SpendCapConfig.from_file(root / "config" / "shopping.harness.json")
+    ledger = SpendLedger(config=caps)
+    tz = ZoneInfo("Europe/Madrid")
+    now = datetime(2026, 1, 5, 12, 0, 0, tzinfo=tz)
+    under = ledger.check(29.99, now=now)
+    over = ledger.check(60.0, now=now)
+    ledger.record(40.0, now=now)
+    second = ledger.check(20.0, now=now)
+    cap_math_ok = (
+        caps.daily_limit == 50.0
+        and caps.weekly_limit == 150.0
+        and under.ok
+        and (not over.ok)
+        and over.reason == "spend_cap_daily"
+        and (not second.ok)
+        and second.reason == "spend_cap_daily"
+    )
+    checks.append(
+        {
+            "id": "unit.shopping.spend_cap_math",
+            "result": "PASS" if cap_math_ok else "FAIL",
+            "detail": (
+                f"daily={caps.daily_limit} under={under.ok} over={over.reason} "
+                f"second={second.reason}"
+            ),
+        }
+    )
+
+    tier_ok = tier_for("buy") == ApprovalTier.HARD_APPROVE
+    checks.append(
+        {
+            "id": "unit.shopping.hard_approve_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": f"tier={tier_for('buy').value}",
+        }
+    )
+
+    intent_ok = looks_like_shopping("Buy my usual protein powder.") and not looks_like_booking(
+        "Buy my usual protein powder."
+    )
+    checks.append(
+        {
+            "id": "unit.shopping.intent_detection",
+            "result": "PASS" if intent_ok else "FAIL",
+            "detail": f"shop={looks_like_shopping(EXPECTED_E2E07_UTTERANCE)}",
+        }
+    )
+
+    return checks
+
+
+def _run_shopping_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Propose buy_count=0; Accept under cap → dry-run; freeze/cap block."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    tz = ZoneInfo("Europe/Madrid")
+    clock = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher = OutboundMessageCatcher()
+    gw = ActionGateway(clock=clock)
+    svc = ShoppingService(
+        clock=clock,
+        catcher=catcher,
+        gateway=gw,
+        recipient=owner,
+        merchant_fixture=root / "fixtures" / "shopping" / "merchant-catalog.json",
+        caps_config=root / "config" / "shopping.harness.json",
+    )
+
+    proposed = svc.propose_from_utterance(EXPECTED_E2E07_UTTERANCE)
+    pending = gw.approvals.list(status=ApprovalStatus.PENDING)
+    propose_ok = (
+        proposed.ok
+        and proposed.approval_id is not None
+        and proposed.tier == ApprovalTier.HARD_APPROVE.value
+        and not proposed.executed
+        and gw.commerce.buy_count == 0
+        and proposed.price == 29.99
+        and len(pending) == 1
+        and catcher.count() >= 1
+        and catcher.messages[0].meta.get("kind") == "shopping_propose"
+        and proposed.task_id is not None
+    )
+    checks.append(
+        {
+            "id": "integration.shopping.nl_propose_hard_approve",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"ok={proposed.ok} approval={proposed.approval_id} "
+                f"buy={gw.commerce.buy_count} price={proposed.price} "
+                f"reason={proposed.reason}"
+            ),
+        }
+    )
+
+    inbox = AndroidApprovalInboxApi(gw)
+    accepted = inbox.accept(proposed.approval_id) if proposed.approval_id else None
+    receipts = [m for m in catcher.messages if m.meta.get("kind") == "shopping_receipt"]
+    task = svc.store.get(proposed.task_id) if proposed.task_id else None
+    audits = (
+        gw.audit.for_approval(proposed.approval_id) if proposed.approval_id else []
+    )
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and gw.commerce.buy_count == 1
+        and len(receipts) == 1
+        and task is not None
+        and task.is_success
+        and task.status == PurchaseStatus.PURCHASED
+        and isinstance(accepted.execute.result if accepted.execute else None, dict)
+        and (accepted.execute.result or {}).get("dry_run") is True
+        and any(a.success and a.approval_id == proposed.approval_id for a in audits)
+        and len(gw.spend.entries) == 1
+    )
+    checks.append(
+        {
+            "id": "integration.shopping.accept_dry_run_receipt",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} buy={gw.commerce.buy_count} "
+                f"receipts={len(receipts)} task={task.status.value if task else None} "
+                f"audits={len(audits)}"
+            ),
+        }
+    )
+
+    # Freeze blocks even with stale accepted approval (INV-PAY-001 mirror).
+    clock_f = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher_f = OutboundMessageCatcher()
+    gw_f = ActionGateway(clock=clock_f)
+    svc_f = ShoppingService(
+        clock=clock_f,
+        catcher=catcher_f,
+        gateway=gw_f,
+        recipient=owner,
+        merchant_fixture=root / "fixtures" / "shopping" / "merchant-catalog.json",
+        caps_config=root / "config" / "shopping.harness.json",
+    )
+    prop_f = svc_f.propose_from_utterance(EXPECTED_E2E07_UTTERANCE)
+    assert prop_f.approval_id
+    gw_f.accept(prop_f.approval_id)
+    gw_f.freeze_spending()
+    blocked_f = gw_f.execute(prop_f.approval_id)
+    freeze_ok = (
+        (not blocked_f.ok)
+        and blocked_f.reason == "freeze_spending"
+        and gw_f.commerce.buy_count == 0
+        and any(r.get("reason") == "freeze_spending" for r in gw_f.execute_rejections)
+        and gw_f.approvals.get(prop_f.approval_id) is not None
+        and gw_f.approvals.get(prop_f.approval_id).status == ApprovalStatus.ACCEPTED  # type: ignore[union-attr]
+    )
+    checks.append(
+        {
+            "id": "integration.shopping.freeze_blocks_stale_approval",
+            "result": "PASS" if freeze_ok else "FAIL",
+            "detail": (
+                f"reason={blocked_f.reason} buy={gw_f.commerce.buy_count} "
+                f"rejections={len(gw_f.execute_rejections)}"
+            ),
+        }
+    )
+
+    # Over cap → blocked with cap reason (INV-PAY-002 mirror).
+    clock_c = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher_c = OutboundMessageCatcher()
+    gw_c = ActionGateway(clock=clock_c)
+    svc_c = ShoppingService(
+        clock=clock_c,
+        catcher=catcher_c,
+        gateway=gw_c,
+        recipient=owner,
+        merchant_fixture=root / "fixtures" / "shopping" / "merchant-catalog.json",
+        spend_caps=SpendCapConfig(daily_limit=10.0, weekly_limit=150.0),
+    )
+    prop_c = svc_c.propose_from_utterance(EXPECTED_E2E07_UTTERANCE)
+    accept_c = (
+        AndroidApprovalInboxApi(gw_c).accept(prop_c.approval_id)
+        if prop_c.approval_id
+        else None
+    )
+    cap_ok = (
+        prop_c.ok
+        and accept_c is not None
+        and (not accept_c.ok)
+        and accept_c.execute is not None
+        and accept_c.execute.reason == "spend_cap_daily"
+        and gw_c.commerce.buy_count == 0
+        and any(r.get("reason") == "spend_cap_daily" for r in gw_c.execute_rejections)
+    )
+    checks.append(
+        {
+            "id": "integration.shopping.cap_breach_blocks",
+            "result": "PASS" if cap_ok else "FAIL",
+            "detail": (
+                f"reason={getattr(getattr(accept_c, 'execute', None), 'reason', None)} "
+                f"buy={gw_c.commerce.buy_count}"
+            ),
+        }
+    )
+
+    # Deny path.
+    clock_d = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher_d = OutboundMessageCatcher()
+    gw_d = ActionGateway(clock=clock_d)
+    svc_d = ShoppingService(
+        clock=clock_d,
+        catcher=catcher_d,
+        gateway=gw_d,
+        recipient=owner,
+        merchant_fixture=root / "fixtures" / "shopping" / "merchant-catalog.json",
+        caps_config=root / "config" / "shopping.harness.json",
+    )
+    prop_d = svc_d.propose_from_utterance(EXPECTED_E2E07_UTTERANCE)
+    deny = (
+        AndroidApprovalInboxApi(gw_d).deny(prop_d.approval_id)
+        if prop_d.approval_id
+        else None
+    )
+    late = gw_d.execute(prop_d.approval_id) if prop_d.approval_id else None
+    deny_task = svc_d.store.get(prop_d.task_id) if prop_d.task_id else None
+    deny_ok = (
+        prop_d.ok
+        and deny is not None
+        and deny.status == ApprovalStatus.DENIED.value
+        and gw_d.commerce.buy_count == 0
+        and late is not None
+        and (not late.ok)
+        and deny_task is not None
+        and deny_task.status == PurchaseStatus.DENIED
+    )
+    checks.append(
+        {
+            "id": "integration.shopping.deny_buys_nothing",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"deny={deny.status if deny else None} buy={gw_d.commerce.buy_count} "
+                f"task={deny_task.status.value if deny_task else None}"
+            ),
+        }
+    )
+
+    # Virtual User NL path.
+    vu = VirtualUser.bootstrap(root=root)
+    turn = vu.inject_text(EXPECTED_E2E07_UTTERANCE)
+    vu_ok = (
+        turn.allowed
+        and "buy_propose" in turn.tool_calls
+        and vu.last_shopping_propose is not None
+        and vu.last_shopping_propose.ok
+        and vu.buy_count() == 0
+        and vu.last_shopping_propose.price == 29.99
+    )
+    checks.append(
+        {
+            "id": "integration.shopping.virtual_user_nl_path",
+            "result": "PASS" if vu_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} buy={vu.buy_count()} "
+                f"price={getattr(vu.last_shopping_propose, 'price', None)}"
+            ),
+        }
+    )
+
+    # Virtual User Accept under cap → dry-run.
+    vu2 = VirtualUser.bootstrap(root=root)
+    prop_vu = vu2.buy_from_utterance(EXPECTED_E2E07_UTTERANCE)
+    accept_vu = (
+        vu2.android_inbox.accept(prop_vu.approval_id) if prop_vu.approval_id else None
+    )
+    vu_accept_ok = (
+        prop_vu.ok
+        and accept_vu is not None
+        and accept_vu.ok
+        and vu2.buy_count() == 1
+        and any(m.meta.get("kind") == "shopping_receipt" for m in vu2.catcher.messages)
+    )
+    checks.append(
+        {
+            "id": "integration.shopping.virtual_user_accept_e2e07_ready",
+            "result": "PASS" if vu_accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accept_vu, 'ok', None)} buy={vu2.buy_count()} "
+                f"e2e07_ready=true"
+            ),
+        }
+    )
+
+    return checks
+
+
 def _run_android_approval_unit_checks() -> list[dict[str, Any]]:
     """Android approval inbox API: list/Accept/Deny/Edit + soft calendar gate."""
     checks: list[dict[str, Any]] = []
@@ -3134,6 +3486,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-17/",
                     "artifacts/test/task-19/",
                     "artifacts/test/task-20/",
+                    "artifacts/test/task-21/",
                 ],
             },
         },
@@ -3147,7 +3500,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "E2E-03 todo sync + E2E-04 calendar soft confirm + E2E-05 diet → "
             "groceries gates + TASK-17 outbound voice calls (INV-APPR-005) + "
             "TASK-19 Booksy stub bookings (INV-BOOK-001/002) + "
-            "E2E-06 propose→approve→book (+ deny) + E2E-09 expiry (T5): "
+            "E2E-06 propose→approve→book (+ deny) + E2E-09 expiry (T5) + "
+            "TASK-21 shopping dry-run + spend caps/freeze (INV-PAY-001/002): "
             "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
             "Android projection equality; calendar soft-confirm (INV-APPR-003); "
             "diet plan with banned-ingredient absence + grocery todos; "
@@ -3155,7 +3509,10 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "call-mode blocks buy/book/self_mod_apply; hard-approve book "
             "book_count=0 until Accept + calendar writeback + WhatsApp confirm; "
             "deny leaves execute 0; ignored hard approval expires → execute 0; "
-            "failed booking never marks success; fail-closed on broken INV"
+            "failed booking never marks success; shopping propose buy_count=0; "
+            "Accept under cap → dry-run receipt/audit; freeze blocks stale accepted "
+            "approval execute; cap breach → spend_cap_* rejection artifact; "
+            "fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -3187,6 +3544,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-17/verification.json",
             "artifacts/test/task-19/verification.json",
             "artifacts/test/task-20/verification.json",
+            "artifacts/test/task-21/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -3204,6 +3562,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "E2E-09",
         ],
         "t5_exit": overall == "PASS" and not broken,
+        "e2e07_ready": overall == "PASS" and not broken,
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",
@@ -4836,6 +5195,301 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-20/verification.json",
                         "artifacts/test/e2e-06/verification.json",
                         "artifacts/test/e2e-09/verification.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-21 Shopping skill (caps, freeze, dry-run) + INV-PAY-*.
+    # Fail-closed must not stomp happy-path task-21 verification.
+    shopping_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.shopping.")
+    ]
+    shopping_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.shopping.")
+    ]
+    pay_invs = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-PAY-")
+    ]
+    task21_checks = shopping_unit + shopping_integration + pay_invs
+    task21_pass = (
+        all(c.get("result") == "PASS" for c in task21_checks) if task21_checks else False
+    )
+    if not broken:
+        task21 = ROOT / "artifacts" / "test" / "task-21"
+        task21.mkdir(parents=True, exist_ok=True)
+        tz = ZoneInfo("Europe/Madrid")
+        monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+        demo_clock = FakeClock(start=monday)
+        demo_catcher = OutboundMessageCatcher()
+        demo_gw = ActionGateway(clock=demo_clock)
+        demo_svc = ShoppingService(
+            clock=demo_clock,
+            catcher=demo_catcher,
+            gateway=demo_gw,
+            recipient="+15550001111",
+            merchant_fixture=ROOT / "fixtures" / "shopping" / "merchant-catalog.json",
+            caps_config=ROOT / "config" / "shopping.harness.json",
+        )
+        demo_prop = demo_svc.propose_from_utterance(EXPECTED_E2E07_UTTERANCE)
+        buy_before = demo_gw.commerce.buy_count
+        demo_inbox = AndroidApprovalInboxApi(demo_gw)
+        demo_accept = (
+            demo_inbox.accept(demo_prop.approval_id) if demo_prop.approval_id else None
+        )
+        demo_receipts = [
+            m for m in demo_catcher.messages if m.meta.get("kind") == "shopping_receipt"
+        ]
+        demo_task = (
+            demo_svc.store.get(demo_prop.task_id) if demo_prop.task_id else None
+        )
+
+        # Freeze path: stale accepted approval blocked.
+        freeze_clock = FakeClock(start=monday)
+        freeze_catcher = OutboundMessageCatcher()
+        freeze_gw = ActionGateway(clock=freeze_clock)
+        freeze_svc = ShoppingService(
+            clock=freeze_clock,
+            catcher=freeze_catcher,
+            gateway=freeze_gw,
+            recipient="+15550001111",
+            merchant_fixture=ROOT / "fixtures" / "shopping" / "merchant-catalog.json",
+            caps_config=ROOT / "config" / "shopping.harness.json",
+        )
+        freeze_prop = freeze_svc.propose_from_utterance(EXPECTED_E2E07_UTTERANCE)
+        freeze_exec_reason = None
+        if freeze_prop.approval_id:
+            freeze_gw.accept(freeze_prop.approval_id)
+            freeze_gw.freeze_spending()
+            freeze_exec = freeze_gw.execute(freeze_prop.approval_id)
+            freeze_exec_reason = freeze_exec.reason
+
+        # Cap path.
+        cap_clock = FakeClock(start=monday)
+        cap_catcher = OutboundMessageCatcher()
+        cap_gw = ActionGateway(clock=cap_clock)
+        cap_svc = ShoppingService(
+            clock=cap_clock,
+            catcher=cap_catcher,
+            gateway=cap_gw,
+            recipient="+15550001111",
+            merchant_fixture=ROOT / "fixtures" / "shopping" / "merchant-catalog.json",
+            spend_caps=SpendCapConfig(daily_limit=10.0, weekly_limit=150.0),
+        )
+        cap_prop = cap_svc.propose_from_utterance(EXPECTED_E2E07_UTTERANCE)
+        cap_reason = None
+        if cap_prop.approval_id:
+            cap_accept = AndroidApprovalInboxApi(cap_gw).accept(cap_prop.approval_id)
+            cap_reason = cap_accept.execute.reason if cap_accept.execute else None
+
+        # Deny path.
+        deny_clock = FakeClock(start=monday)
+        deny_catcher = OutboundMessageCatcher()
+        deny_gw = ActionGateway(clock=deny_clock)
+        deny_svc = ShoppingService(
+            clock=deny_clock,
+            catcher=deny_catcher,
+            gateway=deny_gw,
+            recipient="+15550001111",
+            merchant_fixture=ROOT / "fixtures" / "shopping" / "merchant-catalog.json",
+            caps_config=ROOT / "config" / "shopping.harness.json",
+        )
+        deny_prop = deny_svc.propose_from_utterance(EXPECTED_E2E07_UTTERANCE)
+        if deny_prop.approval_id:
+            AndroidApprovalInboxApi(deny_gw).deny(deny_prop.approval_id)
+
+        (task21 / "purchases.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": {
+                        "propose": {
+                            "ok": demo_prop.ok,
+                            "approval_id": demo_prop.approval_id,
+                            "task_id": demo_prop.task_id,
+                            "price": demo_prop.price,
+                            "sku": demo_prop.sku,
+                            "merchant": demo_prop.merchant,
+                            "buy_count_at_propose": buy_before,
+                        },
+                        "accept_ok": getattr(demo_accept, "ok", None),
+                        "buy_count": demo_gw.commerce.buy_count,
+                        "task": demo_task.to_dict() if demo_task else None,
+                        "receipt": (
+                            demo_accept.execute.result
+                            if demo_accept and demo_accept.execute
+                            else None
+                        ),
+                        "spend_ledger": demo_gw.spend.snapshot(),
+                    },
+                    "freeze_path": {
+                        "approval_id": freeze_prop.approval_id,
+                        "buy_count": freeze_gw.commerce.buy_count,
+                        "execute_reason": freeze_exec_reason,
+                        "policy": "block_stale_accepted_do_not_cancel",
+                        "rejections": list(freeze_gw.execute_rejections),
+                    },
+                    "cap_path": {
+                        "approval_id": cap_prop.approval_id,
+                        "price": cap_prop.price,
+                        "buy_count": cap_gw.commerce.buy_count,
+                        "execute_reason": cap_reason,
+                        "rejections": list(cap_gw.execute_rejections),
+                    },
+                    "deny_path": {
+                        "approval_id": deny_prop.approval_id,
+                        "buy_count": deny_gw.commerce.buy_count,
+                        "task": (
+                            deny_svc.store.get(deny_prop.task_id).to_dict()
+                            if deny_prop.task_id and deny_svc.store.get(deny_prop.task_id)
+                            else None
+                        ),
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        demo_catcher.write_json(task21 / "outbound-messages.json")
+        (task21 / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "accept": [a.to_dict() for a in demo_gw.approvals.list()],
+                    "freeze": [a.to_dict() for a in freeze_gw.approvals.list()],
+                    "cap": [a.to_dict() for a in cap_gw.approvals.list()],
+                    "deny": [a.to_dict() for a in deny_gw.approvals.list()],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (task21 / "audit.json").write_text(
+            json.dumps(
+                {
+                    "accept": demo_gw.audit.snapshot(),
+                    "freeze": freeze_gw.audit.snapshot(),
+                    "cap": cap_gw.audit.snapshot(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (task21 / "merchant-catalog.json").write_text(
+            json.dumps(
+                {
+                    "merchant": demo_svc.merchant.merchant_card(),
+                    "proposed_options": demo_prop.options,
+                    "chosen_price": demo_prop.price,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        e2e07_ready = (
+            task21_pass
+            and demo_prop.ok
+            and buy_before == 0
+            and demo_gw.commerce.buy_count == 1
+            and len(demo_receipts) == 1
+            and freeze_gw.commerce.buy_count == 0
+            and freeze_exec_reason == "freeze_spending"
+            and cap_gw.commerce.buy_count == 0
+            and cap_reason == "spend_cap_daily"
+            and deny_gw.commerce.buy_count == 0
+        )
+        write_report(
+            task21,
+            layer="task-21",
+            result="PASS" if task21_pass else "FAIL",
+            checks=task21_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-07",
+                "e2e07_ready": e2e07_ready,
+                "buy_count_after_accept": demo_gw.commerce.buy_count,
+                "buy_count_after_freeze": freeze_gw.commerce.buy_count,
+                "buy_count_after_cap": cap_gw.commerce.buy_count,
+                "buy_count_after_deny": deny_gw.commerce.buy_count,
+                "freeze_policy": "block_stale_accepted_do_not_cancel",
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-21/",
+                },
+            },
+        )
+        (task21 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "TASK-21 shopping dry-run merchant: propose usual protein "
+                        "powder behind hard approve (buy_count=0 + price shown); "
+                        "Accept under cap → one dry-run purchase + receipt/audit; "
+                        "freeze blocks execute even with stale accepted approval "
+                        "(policy: do not cancel); over-cap → spend_cap_daily "
+                        "rejection artifact; Deny leaves buy_count=0; "
+                        "INV-PAY-001/002 green; E2E-07 readiness"
+                    ),
+                    "result": "PASS" if task21_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-07",
+                    "e2e07_ready": e2e07_ready,
+                    "invariants": ["INV-PAY-001", "INV-PAY-002"],
+                    "unit_checks": [c.get("id") for c in shopping_unit],
+                    "integration_checks": [c.get("id") for c in shopping_integration],
+                    "buy_count_after_accept": demo_gw.commerce.buy_count,
+                    "buy_count_after_freeze": freeze_gw.commerce.buy_count,
+                    "buy_count_after_cap": cap_gw.commerce.buy_count,
+                    "buy_count_after_deny": deny_gw.commerce.buy_count,
+                    "freeze_policy": "block_stale_accepted_do_not_cancel",
+                    "dry_run_receipt": len(demo_receipts) == 1,
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-02",
+                        "make e2e-03",
+                        "make e2e-04",
+                        "make e2e-05",
+                        "make e2e-06",
+                        "make e2e-09",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-21/report.json",
+                        "artifacts/test/task-21/verification.json",
+                        "artifacts/test/task-21/purchases.json",
+                        "artifacts/test/task-21/approvals.json",
+                        "artifacts/test/task-21/audit.json",
+                        "artifacts/test/task-21/outbound-messages.json",
+                        "artifacts/test/task-21/merchant-catalog.json",
                     ],
                 },
                 indent=2,

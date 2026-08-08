@@ -1,0 +1,10 @@
+{
+  "skill": "shopping",
+  "mode": "dry_run",
+  "spend_caps": {
+    "daily_limit": 50.0,
+    "weekly_limit": 150.0,
+    "currency": "EUR"
+  },
+  "notes": "Harness/CI caps. Cap breach blocks execute (INV-PAY-002). Freeze spending blocks even with stale accepted approval (INV-PAY-001)."
+}

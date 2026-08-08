@@ -6,6 +6,7 @@ Placeholders for OpenClaw Gateway and harness profiles. **Do not commit secrets.
 | --- | --- |
 | [`gateway.example.yaml`](./gateway.example.yaml) | Always-on Gateway template (VPS/home) — copy to `gateway.local.yaml` |
 | [`gateway.harness.json`](./gateway.harness.json) | Harness/CI profile (stdlib JSON) — data paths + hosting flags |
+| [`shopping.harness.json`](./shopping.harness.json) | Shopping dry-run + daily/weekly spend caps (TASK-21 / INV-PAY-*) |
 | [`backup.example.json`](./backup.example.json) | Backup/restore path manifest (config + memory + approvals) |
 | [`harness.example.env`](./harness.example.env) | Virtual User / CI harness flags — copy to `harness.local.env` |
 
