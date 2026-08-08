@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 import traceback
 from datetime import timedelta
 from pathlib import Path
@@ -32,6 +33,8 @@ from policy.approvals import (  # noqa: E402
     tier_for,
 )
 from policy.ingress import evaluate_ingress, normalize_sender  # noqa: E402
+from intelligence.memory.secrets import MemorySecretsError, redact_secrets  # noqa: E402
+from intelligence.memory.store import MemoryStore  # noqa: E402
 
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
@@ -192,6 +195,25 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
         }
     )
 
+    # Memory secrets guard: reject + redact.
+    secret_sample = "api_key=sk-abcdefghijklmnopqrstuvwxyz12345"
+    reject_ok = False
+    try:
+        MemoryStore.seed(Path(tempfile.mkdtemp(prefix="unit-mem-"))).remember(
+            "preferences", "note", secret_sample
+        )
+    except MemorySecretsError:
+        reject_ok = True
+    redacted = redact_secrets(secret_sample)
+    redact_ok = "[REDACTED]" in redacted and "sk-" not in redacted
+    checks.append(
+        {
+            "id": "unit.memory.secrets_guard",
+            "result": "PASS" if (reject_ok and redact_ok) else "FAIL",
+            "detail": f"reject_ok={reject_ok} redact_ok={redact_ok}",
+        }
+    )
+
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
     return {"layer": "unit", "result": result, "checks": checks}
@@ -316,11 +338,97 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
         }
     )
 
+    checks.extend(_run_memory_integration_checks(ROOT))
+
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
     catcher.write_json(layer_dir / "outbound-messages.json")
     write_report(layer_dir, layer="integration", result=result, checks=checks)
     return {"layer": "integration", "result": result, "checks": checks}
+
+
+def _run_memory_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Memory profile R/W — explicit remember, hot load, episodic, restart durability."""
+    checks: list[dict[str, Any]] = []
+    fixture = root / "fixtures" / "memory" / "seed-profile.json"
+
+    with tempfile.TemporaryDirectory(prefix="task04-mem-") as tmp:
+        mem_root = Path(tmp) / "memory"
+        store = MemoryStore.seed_from_fixture(mem_root, fixture)
+
+        # Hot profile on turn includes identity facts.
+        hot = store.load_hot_profile()
+        ctx_lines = store.hot_context_lines()
+        hot_ok = (
+            hot.get("identity", {}).get("name") == "Alex"
+            and "grandma" in hot.get("identity", {}).get("household", "").lower()
+            and any("Allergies" in line for line in ctx_lines)
+        )
+        checks.append(
+            {
+                "id": "integration.memory.hot_profile_turn",
+                "result": "PASS" if hot_ok else "FAIL",
+                "detail": f"name={hot.get('identity', {}).get('name')} lines={ctx_lines}",
+            }
+        )
+
+        # Diet constraints for planner input assembly.
+        constraints = store.planning_constraints()
+        diet_ok = (
+            "peanuts" in constraints.get("allergies", [])
+            and "shellfish" in constraints.get("food_dislikes", [])
+            and constraints.get("diet_phase") == "low carb"
+        )
+        checks.append(
+            {
+                "id": "integration.memory.diet_constraints",
+                "result": "PASS" if diet_ok else "FAIL",
+                "detail": str(constraints),
+            }
+        )
+
+        # Explicit remember persists across harness reboot (new store handle).
+        store.remember("goals", "diet_phase", "low carb — no rice", explicit=True)
+        store.append_episode("User asked to remember Sunday grandma call", tags=["ritual"])
+        reopened = MemoryStore.open(mem_root)
+        reboot_hot = reopened.load_hot_profile()
+        episodes = reopened.read_episodes(limit=5)
+        reboot_ok = (
+            reboot_hot.get("goals", {}).get("diet_phase") == "low carb — no rice"
+            and len(episodes) == 1
+            and "grandma" in episodes[0].get("summary", "").lower()
+        )
+        checks.append(
+            {
+                "id": "integration.memory.remember_persists_restart",
+                "result": "PASS" if reboot_ok else "FAIL",
+                "detail": (
+                    f"diet={reboot_hot.get('goals', {}).get('diet_phase')} "
+                    f"episodes={len(episodes)}"
+                ),
+            }
+        )
+
+        # Secrets must not land in memory files.
+        secret_blocked = False
+        try:
+            reopened.remember("preferences", "leak", "token: supersecret123")
+        except MemorySecretsError:
+            secret_blocked = True
+        disk = (
+            reopened.profile_path.read_text(encoding="utf-8")
+            + reopened.episodes_path.read_text(encoding="utf-8")
+        )
+        secrets_ok = secret_blocked and "supersecret123" not in disk
+        checks.append(
+            {
+                "id": "integration.memory.secrets_not_on_disk",
+                "result": "PASS" if secrets_ok else "FAIL",
+                "detail": f"secret_blocked={secret_blocked}",
+            }
+        )
+
+    return checks
 
 
 def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> int:
@@ -353,6 +461,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                 "artifacts": [
                     "artifacts/test/ci/",
                     "artifacts/test/task-03/",
+                    "artifacts/test/task-04/",
                 ],
             },
         },
@@ -361,9 +470,9 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     # Compact stamp for autonomous verification loops.
     stamp = {
         "claim": (
-            "WhatsApp ingress: allowlisted DM only; groups off; "
-            "non-allowlisted → zero tools/outbound; INV-INGRESS-001/002 adversarial; "
-            "003 scaffold; fail-closed on broken INV"
+            "WhatsApp ingress + memory R/W: allowlisted DM only; groups off; "
+            "hot profile + episodic persist; INV-MEM-001 secrets guard; "
+            "fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -375,6 +484,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         "artifacts": [
             "artifacts/test/ci/report.json",
             "artifacts/test/task-03/verification.json",
+            "artifacts/test/task-04/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -526,6 +636,78 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-03/report.json",
                     "artifacts/test/task-03/verification.json",
                     "artifacts/test/ci/report.json",
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # TASK-04 personal memory artifacts.
+    task04 = ROOT / "artifacts" / "test" / "task-04"
+    task04.mkdir(parents=True, exist_ok=True)
+    mem_ids = [
+        c.get("id")
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-MEM-")
+    ]
+    mem_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.memory.")
+    ]
+    mem_pass = (
+        all(c.get("result") == "PASS" for c in mem_integration) if mem_integration else False
+    ) and (all(c.get("result") == "PASS" for c in [
+        c for L in layers if L["layer"] == "contract" for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-MEM-")
+    ]) if mem_ids else True)
+    write_report(
+        task04,
+        layer="task-04",
+        result="PASS"
+        if (overall == "PASS" and mem_pass)
+        else ("FAIL" if not broken else overall),
+        checks=mem_integration,
+        extra={
+            "broken_allow_all": broken,
+            "memory_invariant_ids": mem_ids,
+            "ci_overall": overall,
+            "fixture": "fixtures/memory/seed-profile.json",
+            "agent_b_rerun": {
+                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                "fail_closed_proof": [
+                    "./scripts/test-ci.sh --break-invariant",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": "artifacts/test/task-04/",
+            },
+        },
+    )
+    (task04 / "verification.json").write_text(
+        json.dumps(
+            {
+                "claim": (
+                    "Hot profile loadable; explicit remember + episodic persist across restart; "
+                    "INV-MEM-001 rejects secrets in memory files"
+                ),
+                "result": "PASS"
+                if (overall == "PASS" and mem_pass)
+                else ("FAIL" if not broken else overall),
+                "ci_overall": overall,
+                "memory_invariants": mem_ids,
+                "integration_checks": [c.get("id") for c in mem_integration],
+                "commands": ["./scripts/test-ci.sh", "make test-ci"],
+                "artifacts": [
+                    "artifacts/test/task-04/report.json",
+                    "artifacts/test/task-04/verification.json",
+                    "fixtures/memory/seed-profile.json",
                 ],
             },
             indent=2,

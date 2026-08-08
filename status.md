@@ -90,11 +90,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Seed memory profile template; hot profile + episodic write/read per `intelligence/memory.md`. Integration tests; no secrets in memory files.
 - **Acceptance:** Memory R/W integration green; fixture seed profile exists.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Agent A — `make test-ci` PASS; `make test-ci-fail-closed` PASS. Hot profile (identity/prefs/goals) always loadable; episodic append/read; explicit remember survives harness reboot; `INV-MEM-001` rejects secret patterns; fixture `fixtures/memory/seed-profile.json` seeded. Ready for Agent B review.
+- **Artifacts:** `src/intelligence/memory/{store,secrets}.py`, `src/invariants/inv_mem_001.py`, `fixtures/memory/seed-profile.json`, `scripts/run_test_ci.py`, `artifacts/test/{ci,task-04}/` (runtime; gitignored)
 
 ### TASK-05 — Hosting / Gateway config skeleton + reboot durability hooks
 - **Phase:** 0
@@ -357,6 +357,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:00 | TASK-03 | Agent A | cursor-grok-4.5-high | implement | Ingress hardened — mock transport + INV-INGRESS-001/002 adversarial + 003 scaffold; status → review |
 | 2026-08-08 22:00 | TASK-03 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; @newsletter non-DM fix; status → done |
 | 2026-08-08 22:02 | TASK-04 | subagent-A | composer-2.5 | implement | Personal memory profile template + R/W integration |
+| 2026-08-08 22:05 | TASK-04 | Agent A | composer-2.5 | implement | Memory store + INV-MEM-001 + integration; status → review |
 
 ---
 
@@ -377,5 +378,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-04 in_progress (memory).  
-**Next:** TASK-04 Agent B, then TASK-05 / TASK-06 / TASK-09.
+**Now:** TASK-04 review (memory — Agent B).  
+**Next:** TASK-05 / TASK-06 / TASK-09.
