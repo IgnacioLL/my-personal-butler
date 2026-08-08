@@ -79,10 +79,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-01
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Allowlisted DM only; groups off; non-allowlisted → no tools / no side effects. Contract tests `INV-INGRESS-001`, `INV-INGRESS-002`. Mock WhatsApp transport per harnesses doc.
 - **Acceptance:** T0 WhatsApp allowlist contract tests green; B adversarial cases.
-- **Result:** PASS (Agent A implement) — Mock WhatsApp transport (inbound injector + outbound catcher + side-effect counters). Policy hardened: normalize sender, empty allowlist fail-closed, `group_id` / `@g.us` / broadcast treated as group. Adversarial `INV-INGRESS-001` (spoofs, empty allowlist, flood) + `INV-INGRESS-002` (group_id without flag, JIDs, mixed DM→group). `INV-INGRESS-003` scaffold (transcript-or-clarify, no silent hard actions). `make test-ci` PASS; `make test-ci-fail-closed` PASS. Ready for Agent B adversarial re-run.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Adversarial spot-checks: stranger/spoof/empty allowlist/flood → zero tools+outbound; group_id without flag, `@g.us`, broadcast, group-JID-on-allowlist → `groups_disabled`; mixed DM→group stable. Review fix: classify `@newsletter` as non-DM (Channels) so mis-allowlisted channel JIDs cannot run agent; INV-INGRESS-002 coverage extended. `INV-INGRESS-003` scaffold intact for TASK-06. Ready for TASK-06 transcription.
 - **Artifacts:** `src/harness/whatsapp_transport.py`, `src/harness/ingress_sim.py`, `src/policy/ingress.py`, `src/invariants/inv_ingress_00{1,2,3}.py`, `scripts/run_test_ci.py`, `artifacts/test/{ci,task-03}/` (runtime; gitignored)
 
 ### TASK-04 — Personal memory profile + read/write
@@ -355,6 +355,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 21:54 | TASK-02 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; INV-APPR/KILL/AUDIT + spot-checks; status → done |
 | 2026-08-08 21:59 | TASK-03 | subagent-A | cursor-grok-4.5-high | implement | Full WhatsApp ingress allowlist + mock transport + adversarial INV-INGRESS |
 | 2026-08-08 22:00 | TASK-03 | Agent A | cursor-grok-4.5-high | implement | Ingress hardened — mock transport + INV-INGRESS-001/002 adversarial + 003 scaffold; status → review |
+| 2026-08-08 22:00 | TASK-03 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; @newsletter non-DM fix; status → done |
 
 ---
 
@@ -375,5 +376,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-03 review (Agent B adversarial re-run).  
-**Next:** TASK-04 / TASK-05 / TASK-09 after TASK-03 done.
+**Now:** TASK-03 done — ready for TASK-06 (transcription) and parallel TASK-04 / TASK-05 / TASK-09.  
+**Next:** Planner dispatch TASK-06 (depends on TASK-03) and/or TASK-04/05/09.
