@@ -1,7 +1,7 @@
 """WhatsApp-like ingress simulator for harness contract tests.
 
 Wraps MockWhatsAppTransport (inbound injector + outbound catcher + counters).
-Not a Gateway replacement — exercises allowlist + side-effect isolation.
+Not a Gateway replacement — exercises allowlist + side-effect isolation + STT path.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from harness.whatsapp_transport import (
     MockWhatsAppTransport,
     TransportTurnResult,
 )
+from intelligence.transcription.pipeline import TranscriptionPipeline
 
 
 @dataclass
@@ -26,6 +27,9 @@ class TurnResult:
     counters: dict[str, int] = field(default_factory=dict)
     transcript: str | None = None
     clarification: str | None = None
+    turn_body: str | None = None
+    stt_outcome: str | None = None
+    tts_spoken: bool = False
 
 
 class IngressSimulator:
@@ -39,6 +43,7 @@ class IngressSimulator:
         groups_enabled: bool = False,
         broken_allow_all: bool = False,
         stt_map: dict[str, str] | None = None,
+        pipeline: TranscriptionPipeline | None = None,
         transport: MockWhatsAppTransport | None = None,
     ) -> None:
         if transport is not None:
@@ -50,6 +55,7 @@ class IngressSimulator:
                 groups_enabled=groups_enabled,
                 broken_allow_all=broken_allow_all,
                 stt_map=stt_map,
+                pipeline=pipeline,
             )
         self.allowlist = self.transport.allowlist
         self.catcher = self.transport.catcher
@@ -64,6 +70,10 @@ class IngressSimulator:
     def counters(self):
         return self.transport.counters
 
+    @property
+    def pipeline(self) -> TranscriptionPipeline:
+        return self.transport.pipeline
+
     def handle(
         self,
         sender: str,
@@ -74,6 +84,7 @@ class IngressSimulator:
         message_id: str | None = None,
         media_type: str | None = None,
         audio_fixture_id: str | None = None,
+        audio_path: str | None = None,
     ) -> TurnResult:
         result = self.transport.inject(
             InboundWhatsAppMessage(
@@ -84,9 +95,27 @@ class IngressSimulator:
                 message_id=message_id,
                 media_type=media_type or ("audio" if audio_fixture_id else "text"),
                 audio_fixture_id=audio_fixture_id,
+                audio_path=audio_path,
             )
         )
         return self._to_turn(result)
+
+    def handle_audio(
+        self,
+        sender: str,
+        *,
+        audio_fixture_id: str,
+        is_group: bool = False,
+        group_id: str | None = None,
+    ) -> TurnResult:
+        return self._to_turn(
+            self.transport.inject_audio(
+                sender,
+                audio_fixture_id=audio_fixture_id,
+                is_group=is_group,
+                group_id=group_id,
+            )
+        )
 
     def inject(self, msg: InboundWhatsAppMessage) -> TurnResult:
         return self._to_turn(self.transport.inject(msg))
@@ -100,6 +129,9 @@ class IngressSimulator:
             counters=dict(result.counters_delta),
             transcript=result.transcript,
             clarification=result.clarification,
+            turn_body=result.turn_body,
+            stt_outcome=result.stt_outcome,
+            tts_spoken=result.tts_spoken,
         )
 
     def snapshot(self) -> dict[str, Any]:

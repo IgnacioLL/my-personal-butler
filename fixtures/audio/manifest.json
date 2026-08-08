@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "max_bytes": 1024,
+  "max_duration_sec": 120,
+  "clarification_default": "Could not transcribe audio — please resend as a short voice note or type your request.",
+  "clips": [
+    {
+      "id": "fx-reminder",
+      "path": "fx-reminder.ogg",
+      "language": "en",
+      "expected_transcript": "Remind me Sunday at 18:00 to call grandma.",
+      "outcome": "ok",
+      "confidence": 0.96,
+      "bytes": 28,
+      "duration_sec": 3.2,
+      "notes": "E2E-01 golden voice reminder clip"
+    },
+    {
+      "id": "fx-reminder-short",
+      "path": "fx-reminder-short.ogg",
+      "language": "en",
+      "expected_transcript": "remind me sunday to call grandma",
+      "outcome": "ok",
+      "confidence": 0.93,
+      "bytes": 34,
+      "duration_sec": 2.1,
+      "notes": "INV-INGRESS-003 mapped-audio happy path"
+    },
+    {
+      "id": "fx-todo",
+      "path": "fx-todo.ogg",
+      "language": "en",
+      "expected_transcript": "Add todo: buy oat milk",
+      "outcome": "ok",
+      "confidence": 0.94,
+      "bytes": 24,
+      "duration_sec": 1.8
+    },
+    {
+      "id": "fx-empty",
+      "path": "fx-empty.ogg",
+      "language": "en",
+      "expected_transcript": "",
+      "outcome": "empty",
+      "confidence": 0.0,
+      "bytes": 24,
+      "duration_sec": 0.4,
+      "clarification": "I couldn't hear anything in that voice note — please resend or type your request."
+    },
+    {
+      "id": "fx-garbage",
+      "path": "fx-garbage.ogg",
+      "language": "en",
+      "expected_transcript": "asdf qwer zxcv mmm",
+      "outcome": "garbage",
+      "confidence": 0.12,
+      "bytes": 26,
+      "duration_sec": 1.0,
+      "clarification": "I couldn't understand that audio — please resend clearly or type your request."
+    },
+    {
+      "id": "fx-unclear-buy",
+      "path": "fx-unclear-buy.ogg",
+      "language": "en",
+      "expected_transcript": "buy something maybe protein",
+      "outcome": "low_confidence",
+      "confidence": 0.34,
+      "bytes": 30,
+      "duration_sec": 2.4,
+      "hard_action_hint": true,
+      "echo_transcript": true,
+      "clarification": "I heard: \"buy something maybe protein\" — please confirm or rephrase before I propose a purchase."
+    },
+    {
+      "id": "fx-oversize",
+      "path": "fx-oversize.ogg",
+      "language": "en",
+      "expected_transcript": null,
+      "outcome": "oversize",
+      "confidence": 0.0,
+      "bytes": 2052,
+      "duration_sec": 180,
+      "clarification": "That voice note is too long or large — please send a shorter clip (under ~2 minutes)."
+    }
+  ]
+}

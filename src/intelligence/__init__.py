@@ -1,1 +1,1 @@
-"""Intelligence layer: memory, models routing, transcription (stubs land per phase)."""
+"""Intelligence layer: memory, models routing, transcription stubs."""

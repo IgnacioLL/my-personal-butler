@@ -37,6 +37,9 @@ from policy.approvals import (  # noqa: E402
 from policy.ingress import evaluate_ingress, normalize_sender  # noqa: E402
 from intelligence.memory.secrets import MemorySecretsError, redact_secrets  # noqa: E402
 from intelligence.memory.store import MemoryStore  # noqa: E402
+from intelligence.transcription.pipeline import TranscriptionPipeline  # noqa: E402
+from intelligence.transcription.stt import SttOutcome, SttStub, load_manifest  # noqa: E402
+from intelligence.transcription.tts import TtsMode, TtsPolicySpy  # noqa: E402
 
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
@@ -216,6 +219,8 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
         }
     )
 
+    checks.extend(_run_transcription_unit_checks(ROOT))
+
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
     return {"layer": "unit", "result": result, "checks": checks}
@@ -342,12 +347,229 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
 
     checks.extend(_run_memory_integration_checks(ROOT))
     checks.extend(_run_task05_hosting_checks(ROOT))
+    checks.extend(_run_transcription_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
     catcher.write_json(layer_dir / "outbound-messages.json")
     write_report(layer_dir, layer="integration", result=result, checks=checks)
     return {"layer": "integration", "result": result, "checks": checks}
+
+
+def _run_transcription_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """STT fixture map + TTS policy mode rules (assert modes only)."""
+    checks: list[dict[str, Any]] = []
+    manifest_path = root / "fixtures" / "audio" / "manifest.json"
+    manifest = load_manifest(manifest_path)
+    clip_ids = {c["id"] for c in manifest.get("clips", [])}
+    manifest_ok = (
+        manifest_path.is_file()
+        and "fx-reminder" in clip_ids
+        and "fx-empty" in clip_ids
+        and "fx-unclear-buy" in clip_ids
+        and (root / "fixtures" / "audio" / "fx-reminder.ogg").is_file()
+    )
+    checks.append(
+        {
+            "id": "unit.stt.fixture_manifest",
+            "result": "PASS" if manifest_ok else "FAIL",
+            "detail": f"clips={sorted(clip_ids)} path={manifest_path}",
+        }
+    )
+
+    stt = SttStub(manifest_path=manifest_path)
+    rem = stt.transcribe("fx-reminder")
+    rem_ok = (
+        rem.usable
+        and rem.outcome is SttOutcome.OK
+        and rem.transcript == "Remind me Sunday at 18:00 to call grandma."
+        and (rem.turn_body or "").startswith("[Audio] ")
+    )
+    checks.append(
+        {
+            "id": "unit.stt.e2e01_fixture_map",
+            "result": "PASS" if rem_ok else "FAIL",
+            "detail": f"outcome={rem.outcome.value} transcript={rem.transcript!r}",
+        }
+    )
+
+    empty = stt.transcribe("fx-empty")
+    unknown = stt.transcribe("fx-does-not-exist")
+    clarify_ok = empty.clarification_needed and unknown.clarification_needed
+    checks.append(
+        {
+            "id": "unit.stt.error_and_unknown_clarify",
+            "result": "PASS" if clarify_ok else "FAIL",
+            "detail": (
+                f"empty={empty.outcome.value} unknown={unknown.outcome.value} "
+                f"clarify={clarify_ok}"
+            ),
+        }
+    )
+
+    # TTS policy: inbound mode speaks only for audio; never mode never speaks.
+    inbound = TtsPolicySpy(mode=TtsMode.INBOUND)
+    never = TtsPolicySpy(mode=TtsMode.NEVER)
+    always = TtsPolicySpy(mode=TtsMode.ALWAYS)
+    tts_ok = (
+        inbound.maybe_speak("hi", inbound_was_audio=True) is True
+        and inbound.maybe_speak("hi", inbound_was_audio=False) is False
+        and never.maybe_speak("hi", inbound_was_audio=True) is False
+        and always.maybe_speak("hi", inbound_was_audio=False) is True
+        and inbound.speak_count == 1
+        and never.speak_count == 0
+        and always.speak_count == 1
+    )
+    checks.append(
+        {
+            "id": "unit.tts.mode_policy",
+            "result": "PASS" if tts_ok else "FAIL",
+            "detail": (
+                f"inbound={inbound.snapshot()} never={never.speak_count} "
+                f"always={always.speak_count}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_transcription_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Voice note → STT stub → transcript turn OR clarification via mock WhatsApp."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    pipeline = TranscriptionPipeline.from_fixtures(
+        manifest_path=root / "fixtures" / "audio" / "manifest.json"
+    )
+    catcher = OutboundMessageCatcher()
+    transport = MockWhatsAppTransport(
+        allowlist=[owner],
+        catcher=catcher,
+        pipeline=pipeline,
+        tts_mode=TtsMode.INBOUND,
+    )
+
+    # Happy path: E2E-01 audio fixture → transcript turn + TTS spy speak.
+    voice = transport.inject_audio(owner, audio_fixture_id="fx-reminder")
+    voice_ok = (
+        voice.allowed
+        and voice.transcript == "Remind me Sunday at 18:00 to call grandma."
+        and (voice.turn_body or "").startswith("[Audio] Remind me Sunday")
+        and voice.clarification is None
+        and "agent.respond" in voice.tool_calls
+        and voice.tts_spoken is True
+        and transport.counters.stt_calls == 1
+        and transport.counters.transcript_turns == 1
+        and transport.counters.clarification_asks == 0
+        and catcher.count() == 1
+    )
+    checks.append(
+        {
+            "id": "integration.transcription.voice_to_transcript_turn",
+            "result": "PASS" if voice_ok else "FAIL",
+            "detail": (
+                f"transcript={voice.transcript!r} turn={voice.turn_body!r} "
+                f"tts={voice.tts_spoken} tools={voice.tool_calls} "
+                f"counters={transport.counters.snapshot()}"
+            ),
+        }
+    )
+
+    # Text inbound must not trigger TTS under inbound mode.
+    transport.reset_effects()
+    text = transport.inject_text(owner, "hello text")
+    # default handler does not call TTS for text; policy spy stays at 0
+    text_tts_ok = (
+        text.allowed
+        and transport.pipeline.tts.speak_count == 0
+        and transport.counters.tts_speaks == 0
+        and transport.counters.stt_calls == 0
+    )
+    checks.append(
+        {
+            "id": "integration.transcription.tts_inbound_mode_text_skip",
+            "result": "PASS" if text_tts_ok else "FAIL",
+            "detail": f"tts_calls={transport.pipeline.tts.snapshot()}",
+        }
+    )
+
+    # Empty / garbage / unknown → clarification; zero hard tools.
+    transport.reset_effects()
+    for fid in ("fx-empty", "fx-garbage", "fx-unknown-xyz"):
+        res = transport.inject_audio(owner, audio_fixture_id=fid)
+        if not res.clarification or "agent.clarify" not in res.tool_calls:
+            checks.append(
+                {
+                    "id": "integration.transcription.clarify_on_bad_audio",
+                    "result": "FAIL",
+                    "detail": f"fixture={fid} result={res}",
+                }
+            )
+            break
+    else:
+        hard = [t for t in transport.tool_call_log if t in (
+            "buy", "book", "self_mod_apply", "policy_change", "transfer_money"
+        )]
+        clarify_ok = (
+            transport.counters.clarification_asks >= 3
+            and transport.counters.transcript_turns == 0
+            and not hard
+        )
+        checks.append(
+            {
+                "id": "integration.transcription.clarify_on_bad_audio",
+                "result": "PASS" if clarify_ok else "FAIL",
+                "detail": (
+                    f"clarifies={transport.counters.clarification_asks} "
+                    f"hard={hard} outbound={catcher.count()}"
+                ),
+            }
+        )
+
+    # Low-confidence buy → echo clarify; never silent buy.
+    transport.reset_effects()
+    risky = transport.inject_audio(owner, audio_fixture_id="fx-unclear-buy")
+    risky_ok = (
+        risky.clarification is not None
+        and "buy" in (risky.clarification or "").lower()
+        and "agent.clarify" in risky.tool_calls
+        and "buy" not in transport.tool_call_log
+        and risky.tts_spoken is False
+    )
+    checks.append(
+        {
+            "id": "integration.transcription.low_confidence_hard_action_clarify",
+            "result": "PASS" if risky_ok else "FAIL",
+            "detail": f"clarification={risky.clarification!r} tools={risky.tool_calls}",
+        }
+    )
+
+    # IngressSimulator wiring: audio fixture id path.
+    sim = IngressSimulator(
+        allowlist=[owner],
+        catcher=OutboundMessageCatcher(),
+        pipeline=TranscriptionPipeline.from_fixtures(
+            manifest_path=root / "fixtures" / "audio" / "manifest.json"
+        ),
+    )
+    sim_res = sim.handle_audio(owner, audio_fixture_id="fx-todo")
+    sim_ok = (
+        sim_res.allowed
+        and sim_res.transcript == "Add todo: buy oat milk"
+        and (sim_res.turn_body or "").startswith("[Audio]")
+        and sim.counters.stt_calls == 1
+    )
+    checks.append(
+        {
+            "id": "integration.transcription.ingress_sim_audio",
+            "result": "PASS" if sim_ok else "FAIL",
+            "detail": (
+                f"transcript={sim_res.transcript!r} turn={sim_res.turn_body!r} "
+                f"stt_calls={sim.counters.stt_calls}"
+            ),
+        }
+    )
+
+    return checks
 
 
 def _run_memory_integration_checks(root: Path) -> list[dict[str, Any]]:
@@ -581,6 +803,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-03/",
                     "artifacts/test/task-04/",
                     "artifacts/test/task-05/",
+                    "artifacts/test/task-06/",
                 ],
             },
         },
@@ -589,9 +812,9 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     # Compact stamp for autonomous verification loops.
     stamp = {
         "claim": (
-            "WhatsApp ingress + memory R/W: allowlisted DM only; groups off; "
-            "hot profile + episodic persist; INV-MEM-001 secrets guard; "
-            "fail-closed on broken INV"
+            "WhatsApp ingress + memory R/W + transcription: allowlisted DM only; "
+            "voice notes → transcript or clarification (INV-INGRESS-003); "
+            "hot profile + episodic persist; fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -605,6 +828,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
             "artifacts/test/task-05/verification.json",
+            "artifacts/test/task-06/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -897,6 +1121,102 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-05/verification.json",
                     "config/gateway.harness.json",
                     "config/backup.example.json",
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # TASK-06 transcription pipeline artifacts.
+    task06 = ROOT / "artifacts" / "test" / "task-06"
+    task06.mkdir(parents=True, exist_ok=True)
+    transcription_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith(("unit.stt.", "unit.tts."))
+    ]
+    transcription_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.transcription.")
+    ]
+    ingress_003 = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if c.get("id") == "INV-INGRESS-003"
+    ]
+    task06_checks = transcription_unit + transcription_integration + ingress_003
+    task06_pass = (
+        all(c.get("result") == "PASS" for c in task06_checks) if task06_checks else False
+    )
+    # Capture outbound sample from a voice turn for artifact convention.
+    voice_catcher = OutboundMessageCatcher()
+    voice_transport = MockWhatsAppTransport(
+        allowlist=["+15550001111"],
+        catcher=voice_catcher,
+        pipeline=TranscriptionPipeline.from_fixtures(),
+    )
+    voice_transport.inject_audio("+15550001111", audio_fixture_id="fx-reminder")
+    voice_catcher.write_json(task06 / "outbound-messages.json")
+    write_report(
+        task06,
+        layer="task-06",
+        result="PASS"
+        if (overall == "PASS" and task06_pass)
+        else ("FAIL" if not broken else overall),
+        checks=task06_checks or flat_checks,
+        extra={
+            "broken_allow_all": broken,
+            "ci_overall": overall,
+            "e2e_flow": "E2E-01 (voice reminder) — STT dependency ready",
+            "fixture_manifest": "fixtures/audio/manifest.json",
+            "inv_ingress_003": [c.get("result") for c in ingress_003],
+            "agent_b_rerun": {
+                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                "fail_closed_proof": [
+                    "./scripts/test-ci.sh --break-invariant",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": "artifacts/test/task-06/",
+            },
+        },
+    )
+    (task06 / "verification.json").write_text(
+        json.dumps(
+            {
+                "claim": (
+                    "WhatsApp voice notes pass through STT stub; transcript turn or "
+                    "clarification (INV-INGRESS-003); TTS inbound-mode policy; "
+                    "E2E-01 audio fixture mapped"
+                ),
+                "result": "PASS"
+                if (overall == "PASS" and task06_pass)
+                else ("FAIL" if not broken else overall),
+                "ci_overall": overall,
+                "e2e_flow": "E2E-01",
+                "fixture": "fixtures/audio/manifest.json",
+                "unit_checks": [c.get("id") for c in transcription_unit],
+                "integration_checks": [c.get("id") for c in transcription_integration],
+                "invariants": ["INV-INGRESS-003"],
+                "commands": [
+                    "./scripts/test-ci.sh",
+                    "make test-ci",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": [
+                    "artifacts/test/task-06/report.json",
+                    "artifacts/test/task-06/verification.json",
+                    "artifacts/test/task-06/outbound-messages.json",
+                    "fixtures/audio/manifest.json",
                 ],
             },
             indent=2,
