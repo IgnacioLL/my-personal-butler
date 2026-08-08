@@ -211,7 +211,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-04, TASK-13, TASK-10
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Diet plan from memory + schedule; grocery todos; constraint checks. Eval lane non-blocking. Per `capabilities/diet-and-planning.md`.
 - **Acceptance:** E2E-05 structure checks green; eval optional.
 - **Result:** _(agent)_
@@ -388,6 +388,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:55 | TASK-14 | subagent-A | composer-2.5 | implement | E2E-04 gate calendar soft confirm accept/deny |
 | 2026-08-08 23:00 | TASK-14 | Agent A | composer-2.5 | implement | E2E-04 gate + test:ci e2e layer; status → review |
 | 2026-08-08 23:05 | TASK-14 | Agent B | composer-2.5 | review | PASS — e2e-04/e2e-01/e2e-03/test-ci/fail-closed exit 0; gate:true + accept/deny create counts; status → done |
+| 2026-08-08 23:06 | TASK-15 | subagent-A | composer-2.5 | implement | Diet planning v1 + grocery todos from memory |
 
 ---
 
