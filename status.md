@@ -123,10 +123,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-01, TASK-04, TASK-06
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** One-shot + recurring reminders; habit schedules; cron via fake clock. Per `capabilities/reminders-and-habits.md`. Auto approval tier.
 - **Acceptance:** Unit + integration with clock.advance; outbound confirm captured.
-- **Result:** PASS (Agent A implement) — ReminderStore + NL parse (“Remind me Sunday at 18:00…”) + ReminderScheduler via FakeClock.advance (no wall sleep); outbound confirm/fire via catcher; habit scaffold with WhatsApp-first escalation; `reminder_create`/`habit_create` Auto tier (no hard approval). `make test-ci` + `make test-ci-fail-closed` green. E2E-01 create/fire path ready for TASK-08.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: parse “Remind me Sunday at 18:00 to call grandma” → Sunday 18:00 / body call grandma; `FakeClock.advance` fires outbound `Reminder: call grandma`; `reminder_create`/`habit_create` Auto with zero hard approval items. Review fix: fail-closed must not stomp `artifacts/test/task-07/` verification. INV-* intact. E2E-01 create/fire ready.
 - **Artifacts:** `src/capabilities/reminders/{parse,store,scheduler,service}.py`, `src/policy/action_gateway.py`, `scripts/run_test_ci.py`, `artifacts/test/task-07/`
 
 ### TASK-08 — E2E-01 Voice reminder journey
@@ -367,6 +367,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:15 | TASK-06 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; duration bound fix; status → done |
 | 2026-08-08 22:16 | TASK-07 | subagent-A | cursor-grok-4.5-high | implement | Reminders + habits with fake clock |
 | 2026-08-08 22:17 | TASK-07 | Agent A | cursor-grok-4.5-high | implement | Reminders/habits complete — FakeClock fire + confirm; status → review |
+| 2026-08-08 22:20 | TASK-07 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; parse/fire/auto spot-checks; task-07 artifact stomp fix; status → done |
 
 ---
 
@@ -388,5 +389,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-07 review (Agent B).  
-**Next:** TASK-08 E2E-01 after TASK-07 done.
+**Now:** TASK-07 done.  
+**Next:** TASK-08 E2E-01 (voice reminder journey).
