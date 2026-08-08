@@ -11,14 +11,14 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from capabilities.bookings.parse import EXPECTED_E2E06_UTTERANCE, looks_like_booking
 from capabilities.bookings.service import BookingService, ProposeBookingResult
-from capabilities.bookings.store import BookingStore
+from capabilities.bookings.store import BookingStatus, BookingStore
 from capabilities.calendar.parse import looks_like_schedule
 from capabilities.calendar.service import CalendarService, ProposeCalendarResult
 from capabilities.calendar.store import CalendarStore
@@ -50,7 +50,13 @@ from intelligence.memory.store import MemoryStore
 from intelligence.transcription.pipeline import TranscriptionPipeline
 from intelligence.transcription.tts import TtsMode
 from policy.action_gateway import ActionGateway, ProposeResult
-from policy.approvals import ApprovalStatus, ApprovalTier, is_hard_action, tier_for
+from policy.approvals import (
+    ApprovalError,
+    ApprovalStatus,
+    ApprovalTier,
+    is_hard_action,
+    tier_for,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -170,6 +176,40 @@ class E2E05Result:
     plan_date: Optional[str]
     grocery_todo_count: int
     eval_score: Optional[float]
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
+class E2E06Result:
+    """Machine-check result for E2E-06 Booksy propose → approve → book."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    accept_approval_id: Optional[str]
+    deny_approval_id: Optional[str]
+    book_count_after_accept: int
+    book_count_after_deny: int
+    calendar_create_after_accept: int
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
+class E2E09Result:
+    """Machine-check result for E2E-09 ignored hard approval expiry."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    approval_id: Optional[str]
+    status: Optional[str]
+    book_count: int
     artifacts_dir: str
 
     @property
@@ -2264,6 +2304,541 @@ def run_e2e_04(
                     "deny_approval_id": denied_prop.approval_id if denied_prop else None,
                     "calendar_create_after_accept": create_after_accept,
                     "calendar_create_after_deny": create_after_deny,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    return result
+
+
+def run_e2e_06(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E06Result:
+    """E2E-06 — Booksy propose → approve → book (gate-tagged).
+
+    Accept path:
+      1. Seed shop prefs + free calendar afternoon.
+      2. Text: 'Book a haircut next week afternoon.'
+      3. Stub portal returns slots; agent proposes 2–3 options.
+      4. book_count = 0 until Accept.
+      5. Accept chosen slot → one book + calendar writeback + WhatsApp confirm.
+
+    Deny path (isolated Virtual User):
+      Propose → Deny → book_count stays 0; late execute blocked.
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-06")
+    checks: list[dict[str, Any]] = []
+    utterance = EXPECTED_E2E06_UTTERANCE
+
+    # --- Accept path ---
+    vu = VirtualUser.bootstrap(root=repo)
+    prefs = (vu.seed_profile.get("preferences") or {}) if vu.seed_profile else {}
+    procs = (vu.seed_profile.get("procedures") or {}) if vu.seed_profile else {}
+    seed_ok = (
+        bool(prefs.get("haircut_style"))
+        and "Main St" in str(procs.get("booksy_flow") or "")
+        and len(vu.gateway.calendar.events) == 0
+        and len(vu.calendar_store.list_all()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-06.seed_shop_prefs_free_calendar",
+            "result": "PASS" if seed_ok else "FAIL",
+            "detail": (
+                f"haircut={prefs.get('haircut_style')!r} "
+                f"booksy={procs.get('booksy_flow')!r} "
+                f"events={len(vu.gateway.calendar.events)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    turn = vu.inject_text(utterance)
+    proposed = vu.last_booking_propose
+    propose_ok = (
+        turn.allowed
+        and "book_propose" in turn.tool_calls
+        and proposed is not None
+        and proposed.ok
+        and not proposed.executed
+        and proposed.tier == ApprovalTier.HARD_APPROVE.value
+        and proposed.approval_id is not None
+        and vu.book_count() == 0
+        and 2 <= len(proposed.options) <= 3
+        and all(opt.get("period") == "afternoon" for opt in proposed.options)
+    )
+    checks.append(
+        {
+            "id": "e2e-06.whatsapp_proposes_slots",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} ok={getattr(proposed, 'ok', None)} "
+                f"tier={getattr(proposed, 'tier', None)} book={vu.book_count()} "
+                f"options={len(proposed.options) if proposed else 0}"
+            ),
+            "gate": True,
+        }
+    )
+
+    pending = vu.list_android_approvals()
+    pending_ok = (
+        len(pending) == 1
+        and proposed is not None
+        and proposed.approval_id is not None
+        and pending[0].id == proposed.approval_id
+        and pending[0].action_type == "book"
+        and pending[0].status == ApprovalStatus.PENDING.value
+        and vu.book_count() == 0
+        and vu.calendar_create_count() == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-06.pending_hard_approve_book_zero",
+            "result": "PASS" if pending_ok else "FAIL",
+            "detail": (
+                f"pending={len(pending)} book={vu.book_count()} "
+                f"calendar={vu.calendar_create_count()}"
+            ),
+            "gate": True,
+        }
+    )
+
+    accepted = (
+        vu.accept_approval(proposed.approval_id)
+        if proposed and proposed.approval_id
+        else None
+    )
+    book_after_accept = vu.book_count()
+    calendar_after_accept = vu.calendar_create_count()
+    events_after_accept = list(vu.gateway.calendar.events)
+    confirms = [
+        m for m in vu.catcher.messages if m.meta.get("kind") == "booking_confirm"
+    ]
+    task = (
+        vu.booking_store.get(proposed.task_id)
+        if proposed and proposed.task_id
+        else None
+    )
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and accepted.approval.status == ApprovalStatus.EXECUTED.value
+        and book_after_accept == 1
+        and calendar_after_accept == 1
+        and len(events_after_accept) == 1
+        and len(confirms) == 1
+        and task is not None
+        and task.status == BookingStatus.BOOKED
+        and task.is_success
+        and len(vu.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-06.accept_books_once_writeback",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} book={book_after_accept} "
+                f"calendar={calendar_after_accept} confirms={len(confirms)} "
+                f"task={task.status.value if task else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Deny path (fresh Virtual User — no prior book writes) ---
+    vu_deny = VirtualUser.bootstrap(root=repo)
+    deny_turn = vu_deny.inject_text(utterance)
+    denied_prop = vu_deny.last_booking_propose
+    book_before_deny = vu_deny.book_count()
+    denied = (
+        vu_deny.deny_approval(denied_prop.approval_id)
+        if denied_prop and denied_prop.approval_id
+        else None
+    )
+    book_after_deny = vu_deny.book_count()
+    late_exec = (
+        vu_deny.gateway.execute(denied_prop.approval_id)
+        if denied_prop and denied_prop.approval_id
+        else None
+    )
+    deny_task = (
+        vu_deny.booking_store.get(denied_prop.task_id)
+        if denied_prop and denied_prop.task_id
+        else None
+    )
+    deny_ok = (
+        deny_turn.allowed
+        and "book_propose" in deny_turn.tool_calls
+        and denied_prop is not None
+        and denied_prop.ok
+        and denied_prop.approval_id is not None
+        and book_before_deny == 0
+        and denied is not None
+        and denied.status == ApprovalStatus.DENIED.value
+        and book_after_deny == 0
+        and vu_deny.calendar_create_count() == 0
+        and late_exec is not None
+        and (not late_exec.ok)
+        and deny_task is not None
+        and deny_task.status == BookingStatus.DENIED
+        and not deny_task.is_success
+        and len(vu_deny.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-06.deny_books_nothing",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"deny_status={denied.status if denied else None} "
+                f"book_before={book_before_deny} book_after={book_after_deny} "
+                f"late={getattr(late_exec, 'reason', None)} "
+                f"task={deny_task.status.value if deny_task else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = E2E06Result(
+        result=overall,
+        checks=checks,
+        accept_approval_id=proposed.approval_id if proposed else None,
+        deny_approval_id=denied_prop.approval_id if denied_prop else None,
+        book_count_after_accept=book_after_accept,
+        book_count_after_deny=book_after_deny,
+        calendar_create_after_accept=calendar_after_accept,
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        vu.catcher.write_json(out / "outbound-messages.json")
+        (out / "bookings.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": {
+                        "book_count": book_after_accept,
+                        "calendar_create_count": calendar_after_accept,
+                        "events": events_after_accept,
+                        "task": task.to_dict() if task else None,
+                        "options": proposed.options if proposed else [],
+                        "confirms": len(confirms),
+                    },
+                    "deny_path": {
+                        "book_count": book_after_deny,
+                        "calendar_create_count": vu_deny.calendar_create_count(),
+                        "task": deny_task.to_dict() if deny_task else None,
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": vu.android_inbox.snapshot(),
+                    "deny_path": vu_deny.android_inbox.snapshot(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            out,
+            layer="e2e-06",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-06",
+                "gate": True,
+                "utterance": utterance,
+                "accept_approval_id": proposed.approval_id if proposed else None,
+                "deny_approval_id": denied_prop.approval_id if denied_prop else None,
+                "book_count_after_accept": book_after_accept,
+                "book_count_after_deny": book_after_deny,
+                "t5_exit": overall == "PASS",
+                "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-06",
+                        "python3 scripts/run_e2e_06.py",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/e2e-06/",
+                },
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-06 Booksy propose→approve→book: WhatsApp "
+                        f"{utterance!r} proposes 2–3 afternoon slots with "
+                        "book_count=0; Accept books once + calendar writeback + "
+                        "WhatsApp confirm; Deny leaves book_count=0 and late "
+                        "execute blocked (T5 exit)"
+                    ),
+                    "result": overall,
+                    "flow": "E2E-06",
+                    "gate": True,
+                    "t5_exit": overall == "PASS",
+                    "checks": [c["id"] for c in checks],
+                    "commands": [
+                        "python3 scripts/run_e2e_06.py",
+                        "make e2e-06",
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/e2e-06/report.json",
+                        "artifacts/test/e2e-06/verification.json",
+                        "artifacts/test/e2e-06/bookings.json",
+                        "artifacts/test/e2e-06/approvals.json",
+                        "artifacts/test/e2e-06/outbound-messages.json",
+                    ],
+                    "accept_approval_id": proposed.approval_id if proposed else None,
+                    "deny_approval_id": denied_prop.approval_id if denied_prop else None,
+                    "book_count_after_accept": book_after_accept,
+                    "book_count_after_deny": book_after_deny,
+                    "calendar_create_after_accept": calendar_after_accept,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    return result
+
+
+def run_e2e_09(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E09Result:
+    """E2E-09 — Ignored hard approval expires (execute stays 0).
+
+    1. Create booking approval (hard).
+    2. Advance clock past expiry (default hard TTL 4h).
+    3. Attempt late Accept / execute → blocked; book_count still 0.
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-09")
+    checks: list[dict[str, Any]] = []
+    utterance = EXPECTED_E2E06_UTTERANCE
+
+    vu = VirtualUser.bootstrap(root=repo)
+    proposed = vu.book_from_utterance(utterance)
+    book_at_propose = vu.book_count()
+    propose_ok = (
+        proposed.ok
+        and proposed.approval_id is not None
+        and proposed.tier == ApprovalTier.HARD_APPROVE.value
+        and not proposed.executed
+        and book_at_propose == 0
+        and len(vu.pending_approvals()) == 1
+    )
+    checks.append(
+        {
+            "id": "e2e-09.booking_approval_pending",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"ok={proposed.ok} approval_id={proposed.approval_id} "
+                f"book={book_at_propose} pending={len(vu.pending_approvals())}"
+            ),
+            "gate": True,
+        }
+    )
+
+    item_before = (
+        vu.gateway.approvals.get(proposed.approval_id) if proposed.approval_id else None
+    )
+    status_before = item_before.status if item_before else None
+    expires_at_before = item_before.expires_at if item_before else None
+    vu.advance(timedelta(hours=5))
+    expired_list = vu.gateway.approvals.expire_due()
+    expired_item = (
+        vu.gateway.approvals.get(proposed.approval_id) if proposed.approval_id else None
+    )
+    expire_ok = (
+        item_before is not None
+        and status_before == ApprovalStatus.PENDING
+        and expired_item is not None
+        and expired_item.status == ApprovalStatus.EXPIRED
+        and any(e.id == proposed.approval_id for e in expired_list)
+        and vu.book_count() == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-09.clock_past_expiry",
+            "result": "PASS" if expire_ok else "FAIL",
+            "detail": (
+                f"before={status_before.value if status_before else None} "
+                f"after={expired_item.status.value if expired_item else None} "
+                f"expires_at={expires_at_before.isoformat() if expires_at_before else None} "
+                f"expired_n={len(expired_list)} book={vu.book_count()}"
+            ),
+            "gate": True,
+        }
+    )
+
+    late_accept_ok: bool | None = None
+    late_accept_err: str | None = None
+    if proposed.approval_id:
+        try:
+            late_accept = vu.accept_approval(proposed.approval_id)
+            late_accept_ok = late_accept.ok
+        except ApprovalError as exc:
+            late_accept_ok = False
+            late_accept_err = str(exc)
+    late_exec = (
+        vu.gateway.execute(proposed.approval_id) if proposed.approval_id else None
+    )
+    late_ok = (
+        late_accept_ok is False
+        and late_exec is not None
+        and (not late_exec.ok)
+        and vu.book_count() == 0
+        and vu.calendar_create_count() == 0
+        and expired_item is not None
+        and expired_item.status == ApprovalStatus.EXPIRED
+    )
+    checks.append(
+        {
+            "id": "e2e-09.late_accept_execute_blocked",
+            "result": "PASS" if late_ok else "FAIL",
+            "detail": (
+                f"late_accept_ok={late_accept_ok} err={late_accept_err!r} "
+                f"late_exec={getattr(late_exec, 'reason', None)} "
+                f"book={vu.book_count()} calendar={vu.calendar_create_count()}"
+            ),
+            "gate": True,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = E2E09Result(
+        result=overall,
+        checks=checks,
+        approval_id=proposed.approval_id,
+        status=expired_item.status.value if expired_item else None,
+        book_count=vu.book_count(),
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        vu.catcher.write_json(out / "outbound-messages.json")
+        (out / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "approval_id": proposed.approval_id,
+                    "status_before": status_before.value if status_before else None,
+                    "status_after": expired_item.status.value if expired_item else None,
+                    "expires_at": (
+                        expired_item.expires_at.isoformat()
+                        if expired_item and expired_item.expires_at
+                        else None
+                    ),
+                    "snapshot": vu.android_inbox.snapshot(),
+                    "all": [a.to_dict() for a in vu.gateway.approvals.list()],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "bookings.json").write_text(
+            json.dumps(
+                {
+                    "book_count": vu.book_count(),
+                    "calendar_create_count": vu.calendar_create_count(),
+                    "tasks": vu.booking_store.to_dict(),
+                    "late_accept_ok": late_accept_ok,
+                    "late_exec_reason": getattr(late_exec, "reason", None),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            out,
+            layer="e2e-09",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-09",
+                "gate": True,
+                "utterance": utterance,
+                "approval_id": proposed.approval_id,
+                "status": expired_item.status.value if expired_item else None,
+                "book_count": vu.book_count(),
+                "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "make e2e-09",
+                        "python3 scripts/run_e2e_09.py",
+                        "./scripts/test-ci.sh",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/e2e-09/",
+                },
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-09 ignored hard approval expires: booking hard approve "
+                        "pending → FakeClock +5h → status expired; late Accept/execute "
+                        "blocked; book_count stays 0"
+                    ),
+                    "result": overall,
+                    "flow": "E2E-09",
+                    "gate": True,
+                    "checks": [c["id"] for c in checks],
+                    "commands": [
+                        "python3 scripts/run_e2e_09.py",
+                        "make e2e-09",
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/e2e-09/report.json",
+                        "artifacts/test/e2e-09/verification.json",
+                        "artifacts/test/e2e-09/approvals.json",
+                        "artifacts/test/e2e-09/bookings.json",
+                        "artifacts/test/e2e-09/outbound-messages.json",
+                    ],
+                    "approval_id": proposed.approval_id,
+                    "status": expired_item.status.value if expired_item else None,
+                    "book_count": vu.book_count(),
                 },
                 indent=2,
                 sort_keys=True,

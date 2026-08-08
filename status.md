@@ -35,7 +35,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | Fake clock utility | done | `src/harness/clock.py` — `now()` / `advance(duration)` |
 | INV-* runner skeleton | done | `src/harness/inv_runner.py` + `src/invariants/` |
 | Virtual User harness | done | `src/harness/virtual_user.py` — inject audio/text, create reminders, assert state (E2E-01 gate) |
-| Phase exits require matching T* unlock | done | T4 exit PASS (TASK-17+18): mock voice + E2E-02 ladder + INV-APPR-005 |
+| Phase exits require matching T* unlock | done | T5 exit ready (TASK-19+20): stub portal + E2E-06 gate + INV-BOOK-* (+ E2E-09) |
 
 ---
 
@@ -266,11 +266,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-19
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** E2E-06 accept/deny; E2E-09 ignored approval expiry.
 - **Acceptance:** T5 exit.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Implement complete (Agent A) — `make e2e-06` / `make e2e-09` wired; E2E-06 gated in `test:ci` (+ E2E-09). Accept path: WhatsApp “Book a haircut next week afternoon.” → 2–3 afternoon slots, `book_count=0` until Accept → one book + calendar writeback + WhatsApp confirm. Deny → `book_count=0` + task `denied`. E2E-09: FakeClock +5h → approval `expired`; late Accept/execute blocked. INV-* not weakened. **T5 exit** (stub portal + E2E-06 + INV-BOOK-*) ready for Agent B.
+- **Artifacts:** `scripts/run_e2e_06.py`, `scripts/run_e2e_09.py`, `src/harness/virtual_user.py` (`run_e2e_06`/`run_e2e_09`), `Makefile` (`e2e-06`/`e2e-09`), `scripts/run_test_ci.py` (gate), `artifacts/test/e2e-06/`, `artifacts/test/e2e-09/`, `artifacts/test/task-20/`
 
 ### TASK-21 — Shopping skill (caps, freeze, dry-run)
 - **Phase:** 6 / T6
@@ -404,6 +404,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:55 | TASK-19 | Agent A | cursor-grok-4.5-high | implement | Stub portal + INV-BOOK-001/002 + writeback; status → review |
 | 2026-08-09 01:10 | TASK-19 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/prior e2e exit 0; deny writeback fix; E2E-06 ready; status → done |
 | 2026-08-09 01:12 | TASK-20 | subagent-A | cursor-grok-4.5-high | implement | E2E-06 + E2E-09 booking journeys |
+| 2026-08-09 01:30 | TASK-20 | Agent A | cursor-grok-4.5-high | implement | E2E-06 gate + E2E-09 expiry; T5 exit ready; status → review |
 
 ---
 
@@ -426,5 +427,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-20 in_progress (E2E-06/09).  
-**Next:** TASK-20 Agent B, then Phase 6 shopping.
+**Now:** TASK-20 review (Agent B).  
+**Next:** Phase 6 shopping (TASK-21+) after TASK-20 done.

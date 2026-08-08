@@ -1,4 +1,4 @@
-.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-02 e2e-03 e2e-04 e2e-05 help
+.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-02 e2e-03 e2e-04 e2e-05 e2e-06 e2e-09 help
 
 help:
 	@echo "Targets:"
@@ -9,6 +9,8 @@ help:
 	@echo "  e2e-03               Run E2E-03 Todo WhatsApp → Android journey"
 	@echo "  e2e-04               Run E2E-04 Calendar soft confirm journey"
 	@echo "  e2e-05               Run E2E-05 Diet plan → groceries journey"
+	@echo "  e2e-06               Run E2E-06 Booksy propose → approve → book (T5)"
+	@echo "  e2e-09               Run E2E-09 Ignored hard approval expiry"
 	@echo "  test                 Alias for test-ci"
 
 test-ci:
@@ -39,5 +41,11 @@ e2e-04:
 
 e2e-05:
 	@PYTHONPATH=src python3 ./scripts/run_e2e_05.py
+
+e2e-06:
+	@PYTHONPATH=src python3 ./scripts/run_e2e_06.py
+
+e2e-09:
+	@PYTHONPATH=src python3 ./scripts/run_e2e_09.py
 
 test: test-ci

@@ -39,6 +39,8 @@ from harness.virtual_user import (  # noqa: E402
     run_e2e_04,
     run_e2e_05,
     run_e2e_05_structure,
+    run_e2e_06,
+    run_e2e_09,
     run_t2_approval_inbox,
 )
 from harness.whatsapp_transport import MockWhatsAppTransport  # noqa: E402
@@ -322,7 +324,7 @@ def run_contract(out_dir: Path, *, broken_allow_all: bool) -> dict[str, Any]:
 
 
 def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, Any]:
-    """Gate-tagged E2E flows (ci-gates.md). E2E-01..05 Virtual User journeys (T4)."""
+    """Gate-tagged E2E flows (ci-gates.md). E2E-01..06 Virtual User journeys (T5)."""
     checks: list[dict[str, Any]] = []
     e2e01_dir = ROOT / "artifacts" / "test" / "e2e-01"
     journey01 = run_e2e_01(
@@ -409,6 +411,40 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
             }
         )
 
+    e2e06_dir = ROOT / "artifacts" / "test" / "e2e-06"
+    journey06 = run_e2e_06(
+        root=ROOT,
+        artifacts_dir=e2e06_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey06.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": True,
+                "flow": "E2E-06",
+            }
+        )
+
+    e2e09_dir = ROOT / "artifacts" / "test" / "e2e-09"
+    journey09 = run_e2e_09(
+        root=ROOT,
+        artifacts_dir=e2e09_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey09.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": check.get("gate", True),
+                "flow": "E2E-09",
+            }
+        )
+
     # Mirror a compact layer report under ci/e2e for aggregate layout.
     layer_dir = out_dir / "e2e"
     result = (
@@ -418,6 +454,8 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         and journey03.ok
         and journey04.ok
         and journey05.ok
+        and journey06.ok
+        and journey09.ok
         else "FAIL"
     )
     write_report(
@@ -426,13 +464,24 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         result=result,
         checks=checks,
         extra={
-            "gate_flows": ["E2E-01", "E2E-02", "E2E-03", "E2E-04", "E2E-05"],
+            "gate_flows": [
+                "E2E-01",
+                "E2E-02",
+                "E2E-03",
+                "E2E-04",
+                "E2E-05",
+                "E2E-06",
+                "E2E-09",
+            ],
             "e2e_01_artifacts": "artifacts/test/e2e-01/",
             "e2e_02_artifacts": "artifacts/test/e2e-02/",
             "e2e_03_artifacts": "artifacts/test/e2e-03/",
             "e2e_04_artifacts": "artifacts/test/e2e-04/",
             "e2e_05_artifacts": "artifacts/test/e2e-05/",
+            "e2e_06_artifacts": "artifacts/test/e2e-06/",
+            "e2e_09_artifacts": "artifacts/test/e2e-09/",
             "t4_exit": journey02.ok,
+            "t5_exit": journey06.ok,
             "harness": "VirtualUser",
         },
     )
@@ -440,7 +489,15 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         "layer": "e2e",
         "result": result,
         "checks": checks,
-        "flows": ["E2E-01", "E2E-02", "E2E-03", "E2E-04", "E2E-05"],
+        "flows": [
+            "E2E-01",
+            "E2E-02",
+            "E2E-03",
+            "E2E-04",
+            "E2E-05",
+            "E2E-06",
+            "E2E-09",
+        ],
     }
 
 
@@ -3061,6 +3118,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/e2e-03/",
                     "artifacts/test/e2e-04/",
                     "artifacts/test/e2e-05/",
+                    "artifacts/test/e2e-06/",
+                    "artifacts/test/e2e-09/",
                     "artifacts/test/task-03/",
                     "artifacts/test/task-04/",
                     "artifacts/test/task-05/",
@@ -3074,6 +3133,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-16/",
                     "artifacts/test/task-17/",
                     "artifacts/test/task-19/",
+                    "artifacts/test/task-20/",
                 ],
             },
         },
@@ -3086,13 +3146,15 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "E2E-01 voice reminder + E2E-02 habit escalation ladder (T4) + "
             "E2E-03 todo sync + E2E-04 calendar soft confirm + E2E-05 diet → "
             "groceries gates + TASK-17 outbound voice calls (INV-APPR-005) + "
-            "TASK-19 Booksy stub bookings (INV-BOOK-001/002): "
+            "TASK-19 Booksy stub bookings (INV-BOOK-001/002) + "
+            "E2E-06 propose→approve→book (+ deny) + E2E-09 expiry (T5): "
             "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
             "Android projection equality; calendar soft-confirm (INV-APPR-003); "
             "diet plan with banned-ingredient absence + grocery todos; "
             "WhatsApp→Android→call ordered touches; after-call WhatsApp summary; "
             "call-mode blocks buy/book/self_mod_apply; hard-approve book "
             "book_count=0 until Accept + calendar writeback + WhatsApp confirm; "
+            "deny leaves execute 0; ignored hard approval expires → execute 0; "
             "failed booking never marks success; fail-closed on broken INV"
         ),
         "result": overall,
@@ -3109,6 +3171,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/e2e-03/verification.json",
             "artifacts/test/e2e-04/verification.json",
             "artifacts/test/e2e-05/verification.json",
+            "artifacts/test/e2e-06/verification.json",
+            "artifacts/test/e2e-09/verification.json",
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
             "artifacts/test/task-05/verification.json",
@@ -3122,6 +3186,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-16/verification.json",
             "artifacts/test/task-17/verification.json",
             "artifacts/test/task-19/verification.json",
+            "artifacts/test/task-20/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -3129,7 +3194,16 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             if L["layer"] == "contract"
             for c in L.get("checks", [])
         ],
-        "gate_e2e": ["E2E-01", "E2E-02", "E2E-03", "E2E-04", "E2E-05"],
+        "gate_e2e": [
+            "E2E-01",
+            "E2E-02",
+            "E2E-03",
+            "E2E-04",
+            "E2E-05",
+            "E2E-06",
+            "E2E-09",
+        ],
+        "t5_exit": overall == "PASS" and not broken,
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",
@@ -4648,6 +4722,120 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-19/approvals.json",
                         "artifacts/test/task-19/outbound-messages.json",
                         "artifacts/test/task-19/portal-slots.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-20 E2E-06 Booksy gate + E2E-09 expiry (T5 exit).
+    # Fail-closed must not stomp happy-path task-20 / e2e-06 / e2e-09 verification.
+    e2e06_checks = [
+        c
+        for L in layers
+        if L["layer"] == "e2e"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("e2e-06.")
+    ]
+    e2e09_checks = [
+        c
+        for L in layers
+        if L["layer"] == "e2e"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("e2e-09.")
+    ]
+    task20_pass = (
+        bool(e2e06_checks)
+        and all(c.get("result") == "PASS" for c in e2e06_checks if c.get("gate", True))
+        and bool(e2e09_checks)
+        and all(c.get("result") == "PASS" for c in e2e09_checks if c.get("gate", True))
+    )
+    if not broken:
+        task20 = ROOT / "artifacts" / "test" / "task-20"
+        task20.mkdir(parents=True, exist_ok=True)
+        journey06 = run_e2e_06(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "e2e-06",
+            write_artifacts=True,
+        )
+        journey09 = run_e2e_09(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "e2e-09",
+            write_artifacts=True,
+        )
+        t5_exit = journey06.ok and journey09.ok and task20_pass
+        write_report(
+            task20,
+            layer="task-20",
+            result="PASS" if t5_exit else "FAIL",
+            checks=e2e06_checks + e2e09_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-06",
+                "gate": True,
+                "t5_exit": t5_exit,
+                "book_count_after_accept": journey06.book_count_after_accept,
+                "book_count_after_deny": journey06.book_count_after_deny,
+                "e2e09_status": journey09.status,
+                "e2e09_book_count": journey09.book_count,
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-06",
+                        "make e2e-09",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-20/",
+                },
+            },
+        )
+        (task20 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "TASK-20 / T5 exit: E2E-06 Booksy propose→approve→book "
+                        "(+ deny leaves execute 0) gated green; E2E-09 ignored hard "
+                        "approval expires → late Accept/execute blocked, book_count=0; "
+                        "INV-BOOK-* intact"
+                    ),
+                    "result": "PASS" if t5_exit else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-06",
+                    "gate": True,
+                    "t5_exit": t5_exit,
+                    "e2e06_result": journey06.result,
+                    "e2e09_result": journey09.result,
+                    "book_count_after_accept": journey06.book_count_after_accept,
+                    "book_count_after_deny": journey06.book_count_after_deny,
+                    "calendar_create_after_accept": journey06.calendar_create_after_accept,
+                    "e2e09_status": journey09.status,
+                    "e2e09_book_count": journey09.book_count,
+                    "checks": [c.get("id") for c in e2e06_checks + e2e09_checks],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-02",
+                        "make e2e-03",
+                        "make e2e-04",
+                        "make e2e-05",
+                        "make e2e-06",
+                        "make e2e-09",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-20/report.json",
+                        "artifacts/test/task-20/verification.json",
+                        "artifacts/test/e2e-06/verification.json",
+                        "artifacts/test/e2e-09/verification.json",
                     ],
                 },
                 indent=2,
