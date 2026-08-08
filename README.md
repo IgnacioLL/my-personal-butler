@@ -32,7 +32,7 @@ We **do not** ship a custom orchestration runtime. The OpenClaw Gateway is the c
 
 ## Running tests
 
-T0 harness scaffolding (TASK-01):
+Merge gate `test:ci` (see [`docs/ci-gates.md`](./docs/ci-gates.md) for full INV + E2E map):
 
 | Command | Expectation |
 | --- | --- |
@@ -40,14 +40,16 @@ T0 harness scaffolding (TASK-01):
 | `./scripts/test-ci.sh --break-invariant` | **FAIL** (exit ≠ 0) — deliberate broken allowlist |
 | `make test-ci-fail-closed` | **PASS** only if the broken mode fails (fail-closed proof) |
 
-Layers run in order: **unit** → **contract/INV-*** → **integration** stubs. Artifacts land under `artifacts/test/ci/` (`report.json`, `report.md`, `verification.json`, per-layer dirs, `outbound-messages.json`).
+Layers run in order: **unit** → **contract/INV-*** → **integration** (harness profile) → **e2e** (gate-tagged E2E-01..10, including E2E-07/E2E-08 deny paths). Artifacts land under `artifacts/test/ci/` (`report.json`, `report.md`, `verification.json`, per-layer dirs, `outbound-messages.json`).
+
+Nightly (non-blocking): `make soak-chaos` — restart, duplicate webhooks, clock jumps (see ci-gates.md).
 
 ### Agent B verification
 
 1. `git pull` on `cursor/status-and-delegate-c450`
-2. Happy path: `make test-ci` → exit 0; read `artifacts/test/ci/report.json` (`result: PASS`)
+2. Happy path: `make test-ci` → exit 0; read `artifacts/test/ci/verification.json` (`result: PASS`, `gate_e2e` × 10, `invariants` × 23)
 3. Fail-closed: `make test-ci-fail-closed` → exit 0 of the make target (inner CI must have failed)
-4. Confirm `INV-INGRESS-001` / `INV-INGRESS-002` appear under contract checks
+4. Audit map: [`docs/ci-gates.md`](./docs/ci-gates.md)
 5. Do not weaken invariants to go green
 
 Stdlib Python 3 only — no pip installs required for `test:ci`.

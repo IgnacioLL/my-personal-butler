@@ -13,6 +13,8 @@
 | [`run_e2e_07.py`](./run_e2e_07.py) | E2E-07 Shopping with cap / freeze (+ deny; also invoked by test:ci; T6) |
 | [`run_e2e_08.py`](./run_e2e_08.py) | E2E-08 Self-mod patch accept + deny (also invoked by test:ci; T7) |
 | [`run_e2e_09.py`](./run_e2e_09.py) | E2E-09 Ignored hard approval expiry (also invoked by test:ci) |
+| [`run_e2e_10.py`](./run_e2e_10.py) | E2E-10 Restart mid-flight durability (also invoked by test:ci; T8) |
+| [`run_soak_chaos.py`](./run_soak_chaos.py) | Nightly soak/chaos pack (non-blocking; not in merge gate) |
 | [`backup-restore-placeholder.sh`](./backup-restore-placeholder.sh) | Documented backup/restore paths (no cloud in CI) |
 
 ```bash
@@ -29,6 +31,10 @@ make e2e-06                          # E2E-06 alone (Booksy; T5)
 make e2e-07                          # E2E-07 alone (shopping cap/freeze; T6)
 make e2e-08                          # E2E-08 alone (self-mod accept+deny; T7)
 make e2e-09                          # E2E-09 alone (hard approval expiry)
+make e2e-10                          # E2E-10 alone (restart durability; T8)
+make soak-chaos                      # nightly soak/chaos (non-blocking)
 ```
+
+Gate + INV map: [`docs/ci-gates.md`](../docs/ci-gates.md).
 
 `PYTHONPATH` is set to `src/` so `harness`, `policy`, and `invariants` import cleanly.

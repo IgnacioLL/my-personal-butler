@@ -354,7 +354,7 @@ def run_contract(out_dir: Path, *, broken_allow_all: bool) -> dict[str, Any]:
 
 
 def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, Any]:
-    """Gate-tagged E2E flows (ci-gates.md). E2E-01..06 Virtual User journeys (T5)."""
+    """Gate-tagged E2E flows (ci-gates.md). E2E-01..10 Virtual User journeys (T1–T8)."""
     checks: list[dict[str, Any]] = []
     e2e01_dir = ROOT / "artifacts" / "test" / "e2e-01"
     journey01 = run_e2e_01(
@@ -4314,6 +4314,13 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "E2E-09",
             "E2E-10",
         ],
+        "gate_deny_paths": [
+            {"flow": "E2E-04", "check": "e2e-04.deny_creates_nothing"},
+            {"flow": "E2E-06", "check": "e2e-06.deny_books_nothing"},
+            {"flow": "E2E-07", "check": "e2e-07.deny_buys_nothing"},
+            {"flow": "E2E-08", "check": "e2e-08.deny_leaves_tree_unchanged"},
+        ],
+        "gate_map": "docs/ci-gates.md",
         "t5_exit": overall == "PASS" and not broken,
         "t6_exit": overall == "PASS" and not broken,
         "t7_exit": overall == "PASS" and not broken,
