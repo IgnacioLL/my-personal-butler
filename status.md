@@ -156,7 +156,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-02, TASK-04
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Todo store + Android projection doubles; WhatsApp “add todo” → Android API equality. Per `capabilities/todos.md`, `channels/android-companion.md`.
 - **Acceptance:** E2E-03 ready; state equality tests.
 - **Result:** _(agent)_
@@ -374,6 +374,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:29 | TASK-09 | subagent-A | composer-2.5 | implement | Luna/Terra-Sol models router stubs |
 | 2026-08-08 22:32 | TASK-09 | Agent A | composer-2.5 | implement | Router stubs + INV-MODEL-001/002 + task-09 artifacts; status → review |
 | 2026-08-08 22:35 | TASK-09 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed/e2e-01 exit 0; Luna/Sol spot-checks; status → done |
+| 2026-08-08 22:36 | TASK-10 | subagent-A | composer-2.5 | implement | Todos store + Android projection API doubles |
 
 ---
 
