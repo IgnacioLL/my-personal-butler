@@ -233,10 +233,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-07, TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Mock voice provider; call tool allowlist (`INV-APPR-005`); after-call WhatsApp summary. Per `channels/voice-calls.md`.
 - **Acceptance:** Mock call tests + allowlist invariant.
-- **Result:** Implement complete (Agent A) — MockVoiceProvider places calls + records tool invocations; `INV-APPR-005` blocks buy/book/self_mod_apply mid-call (read-only allowlist); after-call WhatsApp summary queued; EscalationLadder hooks WhatsApp → Android → call (E2E-02 ready). Awaiting Agent B review.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-01` exit 0, `make e2e-03` exit 0, `make e2e-04` exit 0, `make e2e-05` exit 0. Spot-checks: call-mode blocks buy/book/self_mod_apply (`call_mode_forbidden_hard_action`) while read tools allowed; ladder WhatsApp→Android→call ordered touches; after-call WhatsApp summary queued; `INV-APPR-005` PASS. Fail-closed does not stomp task-17 verification (still PASS). INV-* intact (no weaken). No code gaps. **E2E-02 ready** for TASK-18.
 - **Artifacts:** `src/channels/voice/{allowlist,provider}.py`, `src/channels/android/notifications.py`, `src/capabilities/reminders/{escalation,scheduler}.py`, `src/invariants/inv_appr_005.py`, `scripts/run_test_ci.py`, `artifacts/test/task-17/`
 
 ### TASK-18 — E2E-02 Habit escalation ladder
@@ -396,6 +396,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:58 | TASK-16 | Agent B | composer-2.5 | review | PASS — e2e-05/test-ci/fail-closed/e2e-01/03/04 exit 0; gate:true + banned-absent spot-checks; T3 exit; status → done |
 | 2026-08-09 00:00 | TASK-17 | subagent-A | cursor-grok-4.5-high | implement | Mock voice calls + INV-APPR-005 + escalation |
 | 2026-08-09 00:15 | TASK-17 | Agent A | cursor-grok-4.5-high | implement | Mock voice + INV-APPR-005 + ladder; status → review |
+| 2026-08-08 23:05 | TASK-17 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01/03/04/05 exit 0; call-mode + ladder + summary spot-checks; E2E-02 ready; status → done |
 
 ---
 
@@ -418,5 +419,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-17 in review (mock voice + INV-APPR-005 + escalation ladder).  
-**Next:** Agent B review → TASK-18 (E2E-02).
+**Now:** TASK-17 done (mock voice + INV-APPR-005 + escalation ladder).  
+**Next:** TASK-18 (E2E-02 habit escalation ladder).
