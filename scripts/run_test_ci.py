@@ -11,9 +11,10 @@ import json
 import sys
 import tempfile
 import traceback
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -40,6 +41,15 @@ from intelligence.memory.store import MemoryStore  # noqa: E402
 from intelligence.transcription.pipeline import TranscriptionPipeline  # noqa: E402
 from intelligence.transcription.stt import SttOutcome, SttStub, load_manifest  # noqa: E402
 from intelligence.transcription.tts import TtsMode, TtsPolicySpy  # noqa: E402
+from capabilities.reminders.parse import next_weekly_after, parse_reminder  # noqa: E402
+from capabilities.reminders.scheduler import ReminderScheduler  # noqa: E402
+from capabilities.reminders.service import ReminderService  # noqa: E402
+from capabilities.reminders.store import (  # noqa: E402
+    EscalationChannel,
+    ReminderKind,
+    ReminderStatus,
+    ReminderStore,
+)
 
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
@@ -220,6 +230,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     )
 
     checks.extend(_run_transcription_unit_checks(ROOT))
+    checks.extend(_run_reminder_unit_checks())
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -348,6 +359,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_memory_integration_checks(ROOT))
     checks.extend(_run_task05_hosting_checks(ROOT))
     checks.extend(_run_transcription_integration_checks(ROOT))
+    checks.extend(_run_reminder_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -463,6 +475,361 @@ def _run_transcription_unit_checks(root: Path) -> list[dict[str, Any]]:
                 f"inbound={inbound.snapshot()} never={never.speak_count} "
                 f"always={always.speak_count}"
             ),
+        }
+    )
+    return checks
+
+
+def _run_reminder_unit_checks() -> list[dict[str, Any]]:
+    """One-shot NL due times, recurring weekly across DST, snooze/cancel."""
+    checks: list[dict[str, Any]] = []
+    tz_name = "Europe/Madrid"
+    tz = ZoneInfo(tz_name)
+    # E2E-01 setup: Monday 10:00 local.
+    monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+    utterance = "Remind me Sunday at 18:00 to call grandma."
+    parsed = parse_reminder(utterance, now=monday, timezone=tz_name)
+    expected_due = datetime(2026, 1, 11, 18, 0, 0, tzinfo=tz)
+    oneshot_ok = (
+        parsed.kind == "one_shot"
+        and parsed.body.lower() == "call grandma"
+        and parsed.due_at == expected_due
+        and parsed.weekday == 6
+        and parsed.hour == 18
+        and parsed.minute == 0
+    )
+    checks.append(
+        {
+            "id": "unit.reminder.oneshot_nl_due",
+            "result": "PASS" if oneshot_ok else "FAIL",
+            "detail": (
+                f"kind={parsed.kind} due={parsed.due_at.isoformat()} "
+                f"expected={expected_due.isoformat()} body={parsed.body!r}"
+            ),
+        }
+    )
+
+    # Audio-prefixed transcript still parses (E2E-01 STT turn body).
+    audio_utt = "[Audio] Remind me Sunday at 18:00 to call grandma."
+    audio_parsed = parse_reminder(audio_utt, now=monday, timezone=tz_name)
+    audio_ok = audio_parsed.due_at == expected_due and audio_parsed.body.lower() == "call grandma"
+    checks.append(
+        {
+            "id": "unit.reminder.parse_audio_prefix",
+            "result": "PASS" if audio_ok else "FAIL",
+            "detail": f"due={audio_parsed.due_at.isoformat()} body={audio_parsed.body!r}",
+        }
+    )
+
+    # Recurring weekly stable across Europe/Madrid DST spring-forward.
+    pre_dst = datetime(2026, 3, 22, 18, 0, 0, tzinfo=tz)  # Sunday CET
+    post = next_weekly_after(pre_dst, weekday=6, hour=18, minute=0)
+    dst_ok = (
+        post.weekday() == 6
+        and post.hour == 18
+        and post.minute == 0
+        and post.tzinfo is not None
+        and post.utcoffset() != pre_dst.utcoffset()
+    )
+    checks.append(
+        {
+            "id": "unit.reminder.recurring_weekly_dst",
+            "result": "PASS" if dst_ok else "FAIL",
+            "detail": (
+                f"pre={pre_dst.isoformat()} post={post.isoformat()} "
+                f"offsets={pre_dst.utcoffset()}→{post.utcoffset()}"
+            ),
+        }
+    )
+
+    # Recurring parse: every Sunday.
+    every = parse_reminder(
+        "every Sunday remind me to call grandma",
+        now=monday,
+        timezone=tz_name,
+    )
+    every_ok = every.kind == "recurring" and every.weekday == 6 and every.due_at == expected_due
+    checks.append(
+        {
+            "id": "unit.reminder.recurring_every_sunday",
+            "result": "PASS" if every_ok else "FAIL",
+            "detail": f"kind={every.kind} due={every.due_at.isoformat()}",
+        }
+    )
+
+    # Auto tier mapping for reminder/habit create.
+    tier_ok = (
+        tier_for("reminder_create") == ApprovalTier.AUTO
+        and tier_for("habit_create") == ApprovalTier.AUTO
+    )
+    checks.append(
+        {
+            "id": "unit.reminder.auto_approval_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": (
+                f"reminder_create={tier_for('reminder_create').value} "
+                f"habit_create={tier_for('habit_create').value}"
+            ),
+        }
+    )
+
+    # Snooze / cancel state machine (unit on store).
+    store = ReminderStore()
+    clock = FakeClock(start=monday.astimezone(ZoneInfo("UTC")))
+    rem = store.create(
+        text="call grandma",
+        timezone=tz_name,
+        kind=ReminderKind.ONE_SHOT,
+        due_at=expected_due,
+        created_at=clock.now(),
+        hour=18,
+        minute=0,
+        weekday=6,
+        recipient="+15550001111",
+    )
+    snooze_until = expected_due + timedelta(hours=1)
+    store.snooze(rem.id, snooze_until)
+    snoozed = store.get(rem.id)
+    snooze_status = snoozed.status if snoozed else None
+    snooze_due = snoozed.due_at if snoozed else None
+    store.cancel(rem.id)
+    cancelled = store.get(rem.id)
+    sc_ok = (
+        snooze_status == ReminderStatus.SNOOZED
+        and snooze_due == snooze_until
+        and cancelled is not None
+        and cancelled.status == ReminderStatus.CANCELLED
+        and rem.id not in {r.id for r in store.due(snooze_until + timedelta(seconds=1))}
+    )
+    checks.append(
+        {
+            "id": "unit.reminder.snooze_cancel",
+            "result": "PASS" if sc_ok else "FAIL",
+            "detail": (
+                f"snooze={snooze_status.value if snooze_status else None} "
+                f"cancel={cancelled.status.value if cancelled else None}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_reminder_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Create + confirm outbound; fire via FakeClock.advance; habit WhatsApp first step."""
+    checks: list[dict[str, Any]] = []
+    tz_name = "Europe/Madrid"
+    tz = ZoneInfo(tz_name)
+    owner = "+15550001111"
+    seed_path = root / "fixtures" / "memory" / "seed-profile.json"
+    seed = json.loads(seed_path.read_text(encoding="utf-8"))
+    seed_tz = seed.get("identity", {}).get("timezone") or tz_name
+
+    # E2E-01-shaped: Monday 10:00 → create from transcript → confirm; no hard approval.
+    monday_local = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+    clock = FakeClock(start=monday_local)
+    catcher = OutboundMessageCatcher()
+    store = ReminderStore()
+    gw = ActionGateway(clock=clock, reminders=store)
+    svc = ReminderService(
+        store=store,
+        clock=clock,
+        catcher=catcher,
+        gateway=gw,
+        timezone=seed_tz,
+        recipient=owner,
+    )
+    created = svc.create_from_utterance(
+        "Remind me Sunday at 18:00 to call grandma.",
+        timezone=seed_tz,
+    )
+    expected_due = datetime(2026, 1, 11, 18, 0, 0, tzinfo=tz)
+    pending_approvals = gw.approvals.list(status=ApprovalStatus.PENDING)
+    hard_items = [
+        i
+        for i in gw.approvals.list()
+        if i.action_type in {"reminder_create", "habit_create"}
+    ]
+    create_ok = (
+        created.ok
+        and created.reminder is not None
+        and created.reminder.due_at == expected_due
+        and created.tier == "auto"
+        and created.approval_id is None
+        and catcher.count() == 1
+        and catcher.messages[0].meta.get("kind") == "reminder_confirm"
+        and "call grandma" in catcher.messages[0].body.lower()
+        and len(hard_items) == 0
+        and len(pending_approvals) == 0
+        and seed_tz == "Europe/Madrid"
+    )
+    checks.append(
+        {
+            "id": "integration.reminder.e2e01_create_confirm",
+            "result": "PASS" if create_ok else "FAIL",
+            "detail": (
+                f"ok={created.ok} due={created.reminder.due_at.isoformat() if created.reminder else None} "
+                f"tier={created.tier} approval_id={created.approval_id} "
+                f"outbound={catcher.count()} hard_items={len(hard_items)} "
+                f"seed_tz={seed_tz}"
+            ),
+        }
+    )
+
+    # Advance fake clock to due → fire reminder outbound (no wall sleep).
+    assert created.reminder is not None
+    delta = expected_due - clock.now()
+    scheduler = ReminderScheduler(
+        store, clock, catcher, kill=gw.kill, default_recipient=owner
+    )
+    fires = scheduler.advance(delta)
+    rem_after = store.get(created.reminder.id)
+    fire_ok = (
+        len(fires) == 1
+        and fires[0].emitted
+        and fires[0].reason == "ok"
+        and rem_after is not None
+        and rem_after.status == ReminderStatus.FIRED
+        and rem_after.fire_count == 1
+        and any(m.meta.get("kind") == "reminder_fire" for m in catcher.messages)
+        and any("Reminder: call grandma" == m.body for m in catcher.messages)
+    )
+    checks.append(
+        {
+            "id": "integration.reminder.clock_advance_fire",
+            "result": "PASS" if fire_ok else "FAIL",
+            "detail": (
+                f"fires={len(fires)} status={rem_after.status.value if rem_after else None} "
+                f"fire_count={rem_after.fire_count if rem_after else None} "
+                f"outbound={catcher.count()}"
+            ),
+        }
+    )
+
+    # Habit scaffolding: high-priority recurring → WhatsApp first escalation step.
+    clock2 = FakeClock(start=monday_local)
+    catcher2 = OutboundMessageCatcher()
+    store2 = ReminderStore()
+    gw2 = ActionGateway(clock=clock2, reminders=store2)
+    svc2 = ReminderService(
+        store=store2,
+        clock=clock2,
+        catcher=catcher2,
+        gateway=gw2,
+        timezone=tz_name,
+        recipient=owner,
+    )
+    habit_created = svc2.create_from_utterance(
+        "every Sunday at 18:00 remind me to stretch",
+        as_habit=True,
+        habit_priority="high",
+        escalation_enabled=True,
+    )
+    habit = habit_created.habit
+    channel_before = habit.current_channel() if habit else None
+    step_before = habit.escalation_step if habit else None
+    sched2 = ReminderScheduler(
+        store2, clock2, catcher2, kill=gw2.kill, default_recipient=owner
+    )
+    due2 = habit_created.reminder.due_at if habit_created.reminder else expected_due
+    fires2 = sched2.advance(due2 - clock2.now())
+    habit_after = store2.get_habit(habit.id) if habit else None
+    habit_ok = (
+        habit_created.ok
+        and habit is not None
+        and habit.priority == "high"
+        and channel_before is EscalationChannel.WHATSAPP
+        and step_before == 0
+        and len(fires2) == 1
+        and fires2[0].emitted
+        and fires2[0].channel == "whatsapp"
+        and any(m.body.startswith("Habit reminder:") for m in catcher2.messages)
+        and habit_after is not None
+        # After WhatsApp fire without completion, ladder advances toward Android.
+        and habit_after.escalation_step == 1
+        and habit_after.current_channel() is EscalationChannel.ANDROID
+    )
+    checks.append(
+        {
+            "id": "integration.habit.whatsapp_first_step",
+            "result": "PASS" if habit_ok else "FAIL",
+            "detail": (
+                f"ok={habit_created.ok} step_before=0 "
+                f"step_after={habit_after.escalation_step if habit_after else None} "
+                f"channel={fires2[0].channel if fires2 else None} "
+                f"fires={len(fires2)}"
+            ),
+        }
+    )
+
+    # Pause agent blocks proactive reminder fires (capabilities contract case).
+    clock3 = FakeClock(start=monday_local)
+    catcher3 = OutboundMessageCatcher()
+    store3 = ReminderStore()
+    gw3 = ActionGateway(clock=clock3, reminders=store3)
+    svc3 = ReminderService(
+        store=store3, clock=clock3, catcher=catcher3, gateway=gw3, timezone=tz_name, recipient=owner
+    )
+    created3 = svc3.create_from_utterance(
+        "Remind me Sunday at 18:00 to call grandma.",
+        timezone=tz_name,
+    )
+    gw3.pause_agent()
+    sched3 = ReminderScheduler(
+        store3, clock3, catcher3, kill=gw3.kill, default_recipient=owner
+    )
+    assert created3.reminder is not None
+    blocked = sched3.advance(created3.reminder.due_at - clock3.now())
+    pause_ok = (
+        len(blocked) == 1
+        and (not blocked[0].emitted)
+        and blocked[0].reason == "pause_agent"
+        and not any(m.meta.get("kind") == "reminder_fire" for m in catcher3.messages)
+        and store3.get(created3.reminder.id) is not None
+        and store3.get(created3.reminder.id).status == ReminderStatus.ACTIVE
+    )
+    checks.append(
+        {
+            "id": "integration.reminder.pause_stops_fire",
+            "result": "PASS" if pause_ok else "FAIL",
+            "detail": (
+                f"emitted={blocked[0].emitted if blocked else None} "
+                f"reason={blocked[0].reason if blocked else None} "
+                f"fire_msgs={sum(1 for m in catcher3.messages if m.meta.get('kind')=='reminder_fire')}"
+            ),
+        }
+    )
+
+    # Snooze then fire after snooze_until via clock.advance.
+    clock4 = FakeClock(start=monday_local)
+    catcher4 = OutboundMessageCatcher()
+    store4 = ReminderStore()
+    rem4 = store4.create(
+        text="water plants",
+        timezone=tz_name,
+        kind=ReminderKind.ONE_SHOT,
+        due_at=expected_due,
+        created_at=clock4.now(),
+        hour=18,
+        minute=0,
+        weekday=6,
+        recipient=owner,
+    )
+    snooze_until = expected_due + timedelta(hours=2)
+    store4.snooze(rem4.id, snooze_until)
+    sched4 = ReminderScheduler(store4, clock4, catcher4, default_recipient=owner)
+    early = sched4.advance(expected_due - clock4.now())
+    later = sched4.advance(timedelta(hours=2))
+    snooze_fire_ok = (
+        len(early) == 0
+        and len(later) == 1
+        and later[0].emitted
+        and store4.get(rem4.id).status == ReminderStatus.FIRED
+    )
+    checks.append(
+        {
+            "id": "integration.reminder.snooze_then_fire",
+            "result": "PASS" if snooze_fire_ok else "FAIL",
+            "detail": f"early={len(early)} later={len(later)}",
         }
     )
     return checks
@@ -839,6 +1206,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-04/",
                     "artifacts/test/task-05/",
                     "artifacts/test/task-06/",
+                    "artifacts/test/task-07/",
                 ],
             },
         },
@@ -847,9 +1215,9 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     # Compact stamp for autonomous verification loops.
     stamp = {
         "claim": (
-            "WhatsApp ingress + memory R/W + transcription: allowlisted DM only; "
-            "voice notes → transcript or clarification (INV-INGRESS-003); "
-            "hot profile + episodic persist; fail-closed on broken INV"
+            "WhatsApp ingress + memory R/W + transcription + reminders/habits: "
+            "allowlisted DM; voice→transcript/clarify; hot profile; "
+            "one-shot/recurring reminders via FakeClock; fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -864,6 +1232,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-04/verification.json",
             "artifacts/test/task-05/verification.json",
             "artifacts/test/task-06/verification.json",
+            "artifacts/test/task-07/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -1252,6 +1621,118 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-06/verification.json",
                     "artifacts/test/task-06/outbound-messages.json",
                     "fixtures/audio/manifest.json",
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # TASK-07 reminders + habits artifacts.
+    task07 = ROOT / "artifacts" / "test" / "task-07"
+    task07.mkdir(parents=True, exist_ok=True)
+    reminder_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.reminder.")
+    ]
+    reminder_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith(("integration.reminder.", "integration.habit."))
+    ]
+    task07_checks = reminder_unit + reminder_integration
+    task07_pass = (
+        all(c.get("result") == "PASS" for c in task07_checks) if task07_checks else False
+    )
+    # Capture confirm + fire outbound sample for artifact convention (E2E-01 prep).
+    tz = ZoneInfo("Europe/Madrid")
+    monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+    demo_clock = FakeClock(start=monday)
+    demo_catcher = OutboundMessageCatcher()
+    demo_store = ReminderStore()
+    demo_gw = ActionGateway(clock=demo_clock, reminders=demo_store)
+    demo_svc = ReminderService(
+        store=demo_store,
+        clock=demo_clock,
+        catcher=demo_catcher,
+        gateway=demo_gw,
+        timezone="Europe/Madrid",
+        recipient="+15550001111",
+    )
+    demo = demo_svc.create_from_utterance(
+        "Remind me Sunday at 18:00 to call grandma.",
+        timezone="Europe/Madrid",
+    )
+    if demo.reminder is not None:
+        demo_sched = ReminderScheduler(
+            demo_store,
+            demo_clock,
+            demo_catcher,
+            kill=demo_gw.kill,
+            default_recipient="+15550001111",
+        )
+        demo_sched.advance(demo.reminder.due_at - demo_clock.now())
+    demo_catcher.write_json(task07 / "outbound-messages.json")
+    (task07 / "reminders.json").write_text(
+        json.dumps(demo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    write_report(
+        task07,
+        layer="task-07",
+        result="PASS"
+        if (overall == "PASS" and task07_pass)
+        else ("FAIL" if not broken else overall),
+        checks=task07_checks or flat_checks,
+        extra={
+            "broken_allow_all": broken,
+            "ci_overall": overall,
+            "e2e_flow": "E2E-01 (voice reminder) — create/fire ready; E2E-02 habit ladder scaffold",
+            "seed_timezone": "Europe/Madrid",
+            "agent_b_rerun": {
+                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                "fail_closed_proof": [
+                    "./scripts/test-ci.sh --break-invariant",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": "artifacts/test/task-07/",
+            },
+        },
+    )
+    (task07 / "verification.json").write_text(
+        json.dumps(
+            {
+                "claim": (
+                    "One-shot + recurring reminders via FakeClock.advance; "
+                    "outbound confirm/fire captured; habit WhatsApp-first escalation "
+                    "scaffold; reminder_create is Auto (no hard approval); E2E-01 ready"
+                ),
+                "result": "PASS"
+                if (overall == "PASS" and task07_pass)
+                else ("FAIL" if not broken else overall),
+                "ci_overall": overall,
+                "e2e_flow": "E2E-01",
+                "e2e_prep": "E2E-02",
+                "seed_timezone": "Europe/Madrid",
+                "unit_checks": [c.get("id") for c in reminder_unit],
+                "integration_checks": [c.get("id") for c in reminder_integration],
+                "commands": [
+                    "./scripts/test-ci.sh",
+                    "make test-ci",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": [
+                    "artifacts/test/task-07/report.json",
+                    "artifacts/test/task-07/verification.json",
+                    "artifacts/test/task-07/outbound-messages.json",
+                    "artifacts/test/task-07/reminders.json",
                 ],
             },
             indent=2,
