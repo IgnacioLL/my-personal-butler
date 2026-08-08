@@ -6,9 +6,17 @@ not a custom agent runtime.
 
 from .clock import FakeClock
 from .outbound import OutboundMessage, OutboundMessageCatcher
+from .whatsapp_transport import (
+    InboundWhatsAppMessage,
+    MockWhatsAppTransport,
+    SideEffectCounters,
+)
 
 __all__ = [
     "FakeClock",
+    "InboundWhatsAppMessage",
+    "MockWhatsAppTransport",
     "OutboundMessage",
     "OutboundMessageCatcher",
+    "SideEffectCounters",
 ]

@@ -79,11 +79,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-01
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Allowlisted DM only; groups off; non-allowlisted → no tools / no side effects. Contract tests `INV-INGRESS-001`, `INV-INGRESS-002`. Mock WhatsApp transport per harnesses doc.
 - **Acceptance:** T0 WhatsApp allowlist contract tests green; B adversarial cases.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Mock WhatsApp transport (inbound injector + outbound catcher + side-effect counters). Policy hardened: normalize sender, empty allowlist fail-closed, `group_id` / `@g.us` / broadcast treated as group. Adversarial `INV-INGRESS-001` (spoofs, empty allowlist, flood) + `INV-INGRESS-002` (group_id without flag, JIDs, mixed DM→group). `INV-INGRESS-003` scaffold (transcript-or-clarify, no silent hard actions). `make test-ci` PASS; `make test-ci-fail-closed` PASS. Ready for Agent B adversarial re-run.
+- **Artifacts:** `src/harness/whatsapp_transport.py`, `src/harness/ingress_sim.py`, `src/policy/ingress.py`, `src/invariants/inv_ingress_00{1,2,3}.py`, `scripts/run_test_ci.py`, `artifacts/test/{ci,task-03}/` (runtime; gitignored)
 
 ### TASK-04 — Personal memory profile + read/write
 - **Phase:** 0→1 / T1
@@ -353,6 +353,8 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 21:56 | TASK-02 | subagent-A | cursor-grok-4.5-high | implement | Approval matrix + kill switches + INV-APPR/KILL/AUDIT |
 | 2026-08-08 21:58 | TASK-02 | Agent A | cursor-grok-4.5-high | implement | Trust core complete — INV-APPR/KILL/AUDIT green; status → review |
 | 2026-08-08 21:54 | TASK-02 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; INV-APPR/KILL/AUDIT + spot-checks; status → done |
+| 2026-08-08 21:59 | TASK-03 | subagent-A | cursor-grok-4.5-high | implement | Full WhatsApp ingress allowlist + mock transport + adversarial INV-INGRESS |
+| 2026-08-08 22:00 | TASK-03 | Agent A | cursor-grok-4.5-high | implement | Ingress hardened — mock transport + INV-INGRESS-001/002 adversarial + 003 scaffold; status → review |
 
 ---
 
@@ -373,5 +375,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-03 in_progress (WhatsApp ingress).  
-**Next:** TASK-03 Agent B, then TASK-04 / TASK-05 / TASK-09.
+**Now:** TASK-03 review (Agent B adversarial re-run).  
+**Next:** TASK-04 / TASK-05 / TASK-09 after TASK-03 done.
