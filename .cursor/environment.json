@@ -1,0 +1,4 @@
+{
+  "name": "Personal Agent",
+  "install": "python3 --version"
+}
