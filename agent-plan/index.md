@@ -44,10 +44,22 @@ agent-plan/
 ├── trust-and-safety/
 │   ├── index.md
 │   └── approval-matrix.md
-└── operations/
-    ├── index.md
-    ├── hosting.md
-    └── roadmap.md
+├── operations/
+│   ├── index.md
+│   ├── hosting.md
+│   └── roadmap.md
+└── testing/
+    ├── index.md                  ← how we prove it works (AI-autonomous)
+    ├── strategy.md
+    ├── test-levels.md
+    ├── component-matrix.md
+    ├── harnesses-and-fixtures.md
+    ├── safety-invariants.md
+    ├── e2e-flows.md
+    ├── autonomous-agent-process.md
+    ├── ci-gates.md
+    ├── roadmap.md
+    └── components/
 ```
 
 ## Read order
@@ -56,6 +68,7 @@ agent-plan/
 2. [Platform choice](./platform-choice.md)
 3. [Architecture](./architecture.md)
 4. Channels → Intelligence → Capabilities → Trust → Operations
+5. [Testing](./testing/index.md) — verification strategy before implementation
 
 ## Design principles
 
@@ -65,6 +78,7 @@ agent-plan/
 4. **Proactive but quiet** — useful nudges, not chatter.
 5. **Ship thin vertical slices** — reminders + memory before Booksy, shopping, and self-mod.
 6. **Self-mod is allowed but caged** — the agent may edit its own repo only via hard-approved diffs on allowlisted paths.
+7. **Autonomous verification** — prefer harnesses, mocks, and invariants an AI can run without human review.
 
 ## Status
 

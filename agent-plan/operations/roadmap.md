@@ -86,3 +86,5 @@ Phased plan. No calendar-day estimates — phases are capability unlocks.
 ## Tracking
 
 Update this file when a phase exits. Keep decisions in the relevant leaf docs rather than inventing parallel trackers.
+
+Phase exits also require the matching unlock in [testing/roadmap.md](../testing/roadmap.md) (harness CI green — not “worked once on my phone”).
