@@ -68,7 +68,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00, TASK-01
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Implement approval item schema + status machine (`pending|accepted|denied|expired|executed|failed|cancelled`), tiers from `trust-and-safety/approval-matrix.md`, kill switches (`pause agent`, `freeze spending`, `freeze self-mod`, `cancel pending`). Contract tests for `INV-APPR-001..004`, `INV-KILL-001..002`, `INV-AUDIT-001` (as applicable at this stage).
 - **Acceptance:** Invariants green in harness; no hard action path without accept.
 - **Result:** _(agent)_
@@ -350,6 +350,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 21:53 | TASK-01 | subagent-A | cursor-grok-4.5-high | implement | T0 harness: fake clock, INV runner, fail-closed test:ci |
 | 2026-08-08 21:55 | TASK-01 | Agent A | cursor-grok-4.5-high | implement | T0 complete — test:ci + fail-closed proof; status → review |
 | 2026-08-08 21:50 | TASK-01 | Agent B | cursor-grok-4.5-high | review | PASS — fail-closed re-verified; test-ci.sh set -e status fix; status → done |
+| 2026-08-08 21:56 | TASK-02 | subagent-A | cursor-grok-4.5-high | implement | Approval matrix + kill switches + INV-APPR/KILL/AUDIT |
 
 ---
 
