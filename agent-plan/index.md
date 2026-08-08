@@ -39,7 +39,8 @@ agent-plan/
 │   ├── todos.md
 │   ├── bookings.md
 │   ├── shopping.md
-│   └── diet-and-planning.md
+│   ├── diet-and-planning.md
+│   └── self-modification.md
 ├── trust-and-safety/
 │   ├── index.md
 │   └── approval-matrix.md
@@ -59,10 +60,11 @@ agent-plan/
 ## Design principles
 
 1. **One brain, many surfaces** — WhatsApp, Android, and calls share memory and policy.
-2. **Propose → Approve → Execute** for money and external side effects.
+2. **Propose → Approve → Execute** for money, external side effects, and any self-modification of source.
 3. **Voice is first-class** — audio in must be transcribed; audio out when appropriate.
 4. **Proactive but quiet** — useful nudges, not chatter.
-5. **Ship thin vertical slices** — reminders + memory before Booksy and shopping.
+5. **Ship thin vertical slices** — reminders + memory before Booksy, shopping, and self-mod.
+6. **Self-mod is allowed but caged** — the agent may edit its own repo only via hard-approved diffs on allowlisted paths.
 
 ## Status
 

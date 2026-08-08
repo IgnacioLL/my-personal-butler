@@ -12,6 +12,7 @@ Things the agent can **do**. Each capability is a thin vertical slice with tools
 | Diet & planning | Yes (basic) | Auto drafts | [diet-and-planning.md](./diet-and-planning.md) |
 | Bookings (Booksy etc.) | v1.5 | Hard | [bookings.md](./bookings.md) |
 | Shopping | v2 | Hard + caps | [shopping.md](./shopping.md) |
+| Self-modification (own source) | v2+ | **Hard only** | [self-modification.md](./self-modification.md) |
 
 ## Shared capability pattern
 
@@ -34,4 +35,5 @@ Memory + WhatsApp
   → Diet planning
   → Bookings
   → Shopping
+  → Self-modification (branch + diff + hard approve)
 ```

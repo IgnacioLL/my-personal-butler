@@ -10,7 +10,7 @@ Run the agent mainly on **GPT-5.6 Luna** through your **Codex / ChatGPT subscrip
 | --- | --- | --- |
 | Default brain | **Luna** | chat, reminders, light planning, most tool routing |
 | Balanced | Terra (optional) | medium planning, multi-constraint days |
-| Heavy | Sol (rare) | hard weekly plans, messy booking conflicts, deep research |
+| Heavy | Sol (rare) | hard weekly plans, messy booking conflicts, deep research, non-trivial self-mod patches |
 | STT | Dedicated transcription model | WhatsApp / call audio → text |
 | TTS | Cheap/natural TTS | optional spoken WhatsApp replies |
 
@@ -23,6 +23,7 @@ Escalate above Luna when:
 - multi-day plan with calendar + diet + travel constraints
 - booking flow failed once and needs richer browser reasoning
 - user explicitly asks for a deep plan
+- non-trivial self-modification (multi-file code, policy changes)
 
 Stay on Luna when:
 
@@ -30,6 +31,7 @@ Stay on Luna when:
 - “what’s on my calendar”
 - simple diet swaps
 - approval summaries
+- tiny doc/skill wording tweaks (still hard-approved to apply)
 
 ## Credit hygiene
 
@@ -42,7 +44,7 @@ Stay on Luna when:
 
 - Provider: OpenAI / Codex subscription auth
 - Default agent model: Luna
-- Optional per-skill model override for booking/shopping planner
+- Optional per-skill model override for booking/shopping planner and self-mod coding
 - Failover: if subscription exhausted, degrade gracefully (notify on Android/WhatsApp) rather than silently billing unexpected API usage — policy TBD during implementation
 
 ## Acceptance criteria

@@ -63,13 +63,25 @@ Phased plan. No calendar-day estimates — phases are capability unlocks.
 
 **Exit:** Rebuy a known item end-to-end under caps.
 
-## Phase 7 — Polish / “perfect”
+## Phase 7 — Self-modification
+
+- Read-only exploration of allowlisted repo paths
+- Diff proposal skill (docs/skills first)
+- Hard-approve apply path with rollback refs
+- `freeze self-mod` kill switch
+- Policy-change subtype for approval-matrix / safety code
+- Optional Gateway reload as a separate Approve
+
+**Exit:** You can ask the agent to patch a skill; it shows a diff; Accept applies on a branch; Deny does nothing.
+
+## Phase 8 — Polish / “perfect”
 
 - Weekly review ritual (memory hygiene)
 - Morning brief heartbeat
 - Better proactive quiet policies
 - Evaluate Hermes-like memory upgrades if gaps remain
 - Harden backups, audits, injection defenses
+- Tighten self-mod checks (tests before apply, auto-revert option)
 
 ## Tracking
 

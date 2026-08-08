@@ -2,7 +2,7 @@
 
 ## One-sentence architecture
 
-An always-on **OpenClaw Gateway** is the control plane; WhatsApp / calls / Android are surfaces; Luna is the default brain; tools and skills do work; an approval layer gates money and external side effects.
+An always-on **OpenClaw Gateway** is the control plane; WhatsApp / calls / Android are surfaces; Luna is the default brain; tools and skills do work; an approval layer gates money, external side effects, and self-modification of this repo.
 
 ## Context diagram
 
@@ -27,10 +27,10 @@ An always-on **OpenClaw Gateway** is the control plane; WhatsApp / calls / Andro
          │  tools + skills     │
          └──────────┬──────────┘
                     ▼
-    ┌──────────┬──────────┬──────────┬──────────┐
-    ▼          ▼          ▼          ▼          ▼
- Calendar   Browser    Memory     Todos     Commerce
- (Google)   (Booksy)   (you)    (Android)  (approve)
+    ┌──────────┬──────────┬──────────┬──────────┬──────────┐
+    ▼          ▼          ▼          ▼          ▼          ▼
+ Calendar   Browser    Memory     Todos     Commerce    Repo self-mod
+ (Google)   (Booksy)   (you)    (Android)  (approve)   (diff→Accept)
 ```
 
 ## Layers
@@ -40,7 +40,7 @@ An always-on **OpenClaw Gateway** is the control plane; WhatsApp / calls / Andro
 | Surfaces | how you talk / confirm | [channels/](./channels/index.md) |
 | Gateway | sessions, media, cron, approvals | this file + [operations/hosting.md](./operations/hosting.md) |
 | Intelligence | models, STT, memory | [intelligence/](./intelligence/index.md) |
-| Capabilities | reminders, calendar, book, buy, diet | [capabilities/](./capabilities/index.md) |
+| Capabilities | reminders, calendar, book, buy, diet, self-mod | [capabilities/](./capabilities/index.md) |
 | Trust | what may run without you | [trust-and-safety/](./trust-and-safety/index.md) |
 
 ## Request lifecycle (WhatsApp audio)
@@ -69,6 +69,7 @@ An always-on **OpenClaw Gateway** is the control plane; WhatsApp / calls / Andro
 - pending approvals + expiry
 - calendar sync tokens
 - skill configs (Booksy prefs, merchants, spend caps)
+- self-mod audit (approval id ↔ commit/branch)
 - audit log of executed side effects
 
 ## Failure modes to design for
@@ -77,10 +78,11 @@ An always-on **OpenClaw Gateway** is the control plane; WhatsApp / calls / Andro
 | --- | --- |
 | Bad transcript | show transcript; allow “no, I said…” correction |
 | Model refuses / stalls | short retry; ask clarifying question |
-| Booking site UI changed | skill fails soft; ask you to confirm manually |
+| Booking site UI changed | skill fails soft; ask you to confirm manually; optionally propose a self-mod fix |
+| Bad self-mod patch | do not force-apply; show conflict; keep rollback ref |
 | Approval ignored | expire; remind once; never auto-run |
 | Gateway down | queue outbound? or degrade to “I’ll catch up later” on next boot |
 
 ## Implementation stance
 
-Prefer OpenClaw primitives (channels, skills, cron, nodes, approvals) over custom microservices. Add custom code only when a skill cannot express the workflow.
+Prefer OpenClaw primitives (channels, skills, cron, nodes, approvals) over custom microservices. Add custom code only when a skill cannot express the workflow. When the agent changes that code, it must go through the [self-modification](./capabilities/self-modification.md) hard-approve path.

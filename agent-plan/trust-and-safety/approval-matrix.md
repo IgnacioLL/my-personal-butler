@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | **Auto** | safe / reversible / cheap | just do it; optional short confirm |
 | **Soft confirm** | mutates your schedule/data | WhatsApp quick confirm or Android |
-| **Hard approve** | money or external commitment | Android push + Accept/Deny/Edit; WhatsApp backup |
+| **Hard approve** | money, external commitment, or source changes | Android push + Accept/Deny/Edit; WhatsApp backup |
 | **Forbidden** | never without redesign | refuse + explain |
 
 ## Matrix
@@ -23,9 +23,15 @@
 | Update personal memory prefs | Soft (or Auto for explicit “remember…”) |
 | Book Booksy / external appointment | Hard |
 | Buy anything | Hard |
+| Read own allowlisted source | Auto |
+| Propose patch / branch for own source | Soft (share diff) / Hard if you want gated proposals only |
+| Apply patch to own source / skills / config in repo | **Hard (mandatory)** |
+| Change approval policy, kill switches, or spend caps in code | **Hard + policy-change subtype** |
+| Restart Gateway / reload after self-mod | Hard (separate from apply when disruptive) |
 | Message third parties as you | Hard / Forbidden in v1 |
 | Transfer money / subscriptions | Forbidden until explicit design |
 | Disable spend freeze / raise caps | Hard (and intentional UI) |
+| Write secrets into the repo / edit outside allowlist | Forbidden |
 
 ## Approval item schema
 
@@ -35,6 +41,8 @@
 - summary (human)
 - payload (machine)
 - estimated_cost?
+- diff_summary? / files_touched? (required for self-mod)
+- rollback_ref? (branch / commit)
 - source_channel / source_utterance
 - status: pending | accepted | denied | expired | executed | failed
 
@@ -54,4 +62,5 @@
 
 - `pause agent` — no proactive work, replies “paused”
 - `freeze spending` — shopping skill cannot execute
+- `freeze self-mod` — source write/apply tools disabled (read-only still ok)
 - `cancel pending` — all pending approvals → cancelled
