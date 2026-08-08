@@ -277,7 +277,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-02, TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Propose-only then hard execute; spend caps; freeze; receipts/audit; `INV-PAY-*`. Per `capabilities/shopping.md`.
 - **Acceptance:** Cap/freeze/deny paths proven.
 - **Result:** _(agent)_
@@ -406,6 +406,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 01:12 | TASK-20 | subagent-A | cursor-grok-4.5-high | implement | E2E-06 + E2E-09 booking journeys |
 | 2026-08-09 01:30 | TASK-20 | Agent A | cursor-grok-4.5-high | implement | E2E-06 gate + E2E-09 expiry; T5 exit ready; status → review |
 | 2026-08-08 23:19 | TASK-20 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-06/09/test-ci/fail-closed/prior e2e exit 0; accept-once/deny-0/expiry spot-checks; T5 exit; status → done |
+| 2026-08-09 01:25 | TASK-21 | subagent-A | cursor-grok-4.5-high | implement | Shopping caps/freeze/dry-run + INV-PAY |
 
 ---
 
