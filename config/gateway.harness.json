@@ -1,0 +1,32 @@
+{
+  "gateway": {
+    "name": "personal-agent-harness",
+    "mode": "harness"
+  },
+  "data_root": "./data",
+  "paths": {
+    "approvals": "./data/approvals/items.json",
+    "memory": "./data/memory",
+    "backup_root": "./backups"
+  },
+  "hosting": {
+    "always_on": false,
+    "daemon": {
+      "enabled": false,
+      "unit": "openclaw-gateway.service",
+      "notes": "On VPS enable systemd unit; harness runs in-process with FakeClock"
+    },
+    "whatsapp_reconnect": "documented_only",
+    "public_url": null
+  },
+  "backup": {
+    "include": [
+      "config/gateway.local.yaml",
+      "data/memory",
+      "data/approvals",
+      "config/skills"
+    ],
+    "schedule_cron": "0 3 * * *",
+    "script": "scripts/backup-restore-placeholder.sh"
+  }
+}

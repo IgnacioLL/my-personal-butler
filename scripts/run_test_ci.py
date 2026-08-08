@@ -9,10 +9,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 import traceback
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -21,9 +23,12 @@ if str(SRC) not in sys.path:
 
 from harness.artifacts import write_report  # noqa: E402
 from harness.clock import FakeClock  # noqa: E402
+from harness.gateway_harness import GatewayHarness  # noqa: E402
+from harness.gateway_profile import gateway_data_paths, load_gateway_profile  # noqa: E402
 from harness.ingress_sim import IngressSimulator  # noqa: E402
 from harness.inv_runner import run_all  # noqa: E402
 from harness.outbound import OutboundMessageCatcher  # noqa: E402
+from harness.virtual_user import run_e2e_01, run_e2e_03  # noqa: E402
 from harness.whatsapp_transport import MockWhatsAppTransport  # noqa: E402
 from policy.action_gateway import ActionGateway  # noqa: E402
 from policy.approvals import (  # noqa: E402
@@ -32,6 +37,28 @@ from policy.approvals import (  # noqa: E402
     tier_for,
 )
 from policy.ingress import evaluate_ingress, normalize_sender  # noqa: E402
+from intelligence.memory.secrets import MemorySecretsError, redact_secrets  # noqa: E402
+from intelligence.memory.store import MemoryStore  # noqa: E402
+from intelligence.models.fixtures import load_routing_fixture  # noqa: E402
+from intelligence.models.roles import ModelRole  # noqa: E402
+from intelligence.models.router import RoutingSignals, route  # noqa: E402
+from intelligence.models.stubs import ModelStubRegistry  # noqa: E402
+from intelligence.transcription.pipeline import TranscriptionPipeline  # noqa: E402
+from intelligence.transcription.stt import SttOutcome, SttStub, load_manifest  # noqa: E402
+from intelligence.transcription.tts import TtsMode, TtsPolicySpy  # noqa: E402
+from capabilities.reminders.parse import next_weekly_after, parse_reminder  # noqa: E402
+from capabilities.reminders.scheduler import ReminderScheduler  # noqa: E402
+from capabilities.reminders.service import ReminderService  # noqa: E402
+from capabilities.reminders.store import (  # noqa: E402
+    EscalationChannel,
+    ReminderKind,
+    ReminderStatus,
+    ReminderStore,
+)
+from capabilities.todos.parse import looks_like_todo_add, parse_todo  # noqa: E402
+from capabilities.todos.service import TodoService  # noqa: E402
+from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normalize_title  # noqa: E402
+from channels.android.projection import AndroidProjectionApi  # noqa: E402
 
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
@@ -192,6 +219,30 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
         }
     )
 
+    # Memory secrets guard: reject + redact.
+    secret_sample = "api_key=sk-abcdefghijklmnopqrstuvwxyz12345"
+    reject_ok = False
+    try:
+        MemoryStore.seed(Path(tempfile.mkdtemp(prefix="unit-mem-"))).remember(
+            "preferences", "note", secret_sample
+        )
+    except MemorySecretsError:
+        reject_ok = True
+    redacted = redact_secrets(secret_sample)
+    redact_ok = "[REDACTED]" in redacted and "sk-" not in redacted
+    checks.append(
+        {
+            "id": "unit.memory.secrets_guard",
+            "result": "PASS" if (reject_ok and redact_ok) else "FAIL",
+            "detail": f"reject_ok={reject_ok} redact_ok={redact_ok}",
+        }
+    )
+
+    checks.extend(_run_transcription_unit_checks(ROOT))
+    checks.extend(_run_models_unit_checks(ROOT))
+    checks.extend(_run_reminder_unit_checks())
+    checks.extend(_run_todo_unit_checks())
+
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
     return {"layer": "unit", "result": result, "checks": checks}
@@ -231,8 +282,44 @@ def run_contract(out_dir: Path, *, broken_allow_all: bool) -> dict[str, Any]:
     return {"layer": "contract", "result": result, "checks": checks}
 
 
+def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, Any]:
+    """Gate-tagged E2E flows (ci-gates.md). E2E-01 Virtual User voice reminder."""
+    checks: list[dict[str, Any]] = []
+    e2e_dir = ROOT / "artifacts" / "test" / "e2e-01"
+    journey = run_e2e_01(
+        root=ROOT,
+        artifacts_dir=e2e_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": True,
+                "flow": "E2E-01",
+            }
+        )
+    # Mirror a compact layer report under ci/e2e for aggregate layout.
+    layer_dir = out_dir / "e2e"
+    result = "PASS" if journey.ok else "FAIL"
+    write_report(
+        layer_dir,
+        layer="e2e",
+        result=result,
+        checks=checks,
+        extra={
+            "gate_flows": ["E2E-01"],
+            "e2e_01_artifacts": "artifacts/test/e2e-01/",
+            "harness": "VirtualUser",
+        },
+    )
+    return {"layer": "e2e", "result": result, "checks": checks, "flow": "E2E-01"}
+
+
 def run_integration(out_dir: Path) -> dict[str, Any]:
-    """Integration stubs — full Virtual User lands later; prove harness wiring."""
+    """Integration stubs + Virtual User wiring checks."""
     checks: list[dict[str, Any]] = []
     catcher = OutboundMessageCatcher()
     clock = FakeClock()
@@ -316,11 +403,1209 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
         }
     )
 
+    checks.extend(_run_memory_integration_checks(ROOT))
+    checks.extend(_run_task05_hosting_checks(ROOT))
+    checks.extend(_run_transcription_integration_checks(ROOT))
+    checks.extend(_run_models_integration_checks(ROOT))
+    checks.extend(_run_reminder_integration_checks(ROOT))
+    checks.extend(_run_todo_integration_checks(ROOT))
+
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
     catcher.write_json(layer_dir / "outbound-messages.json")
     write_report(layer_dir, layer="integration", result=result, checks=checks)
     return {"layer": "integration", "result": result, "checks": checks}
+
+
+def _run_transcription_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """STT fixture map + TTS policy mode rules (assert modes only)."""
+    checks: list[dict[str, Any]] = []
+    manifest_path = root / "fixtures" / "audio" / "manifest.json"
+    manifest = load_manifest(manifest_path)
+    clip_ids = {c["id"] for c in manifest.get("clips", [])}
+    manifest_ok = (
+        manifest_path.is_file()
+        and "fx-reminder" in clip_ids
+        and "fx-empty" in clip_ids
+        and "fx-unclear-buy" in clip_ids
+        and (root / "fixtures" / "audio" / "fx-reminder.ogg").is_file()
+    )
+    checks.append(
+        {
+            "id": "unit.stt.fixture_manifest",
+            "result": "PASS" if manifest_ok else "FAIL",
+            "detail": f"clips={sorted(clip_ids)} path={manifest_path}",
+        }
+    )
+
+    stt = SttStub(manifest_path=manifest_path)
+    rem = stt.transcribe("fx-reminder")
+    rem_ok = (
+        rem.usable
+        and rem.outcome is SttOutcome.OK
+        and rem.transcript == "Remind me Sunday at 18:00 to call grandma."
+        and (rem.turn_body or "").startswith("[Audio] ")
+    )
+    checks.append(
+        {
+            "id": "unit.stt.e2e01_fixture_map",
+            "result": "PASS" if rem_ok else "FAIL",
+            "detail": f"outcome={rem.outcome.value} transcript={rem.transcript!r}",
+        }
+    )
+
+    empty = stt.transcribe("fx-empty")
+    unknown = stt.transcribe("fx-does-not-exist")
+    clarify_ok = empty.clarification_needed and unknown.clarification_needed
+    checks.append(
+        {
+            "id": "unit.stt.error_and_unknown_clarify",
+            "result": "PASS" if clarify_ok else "FAIL",
+            "detail": (
+                f"empty={empty.outcome.value} unknown={unknown.outcome.value} "
+                f"clarify={clarify_ok}"
+            ),
+        }
+    )
+
+    # Duration bound from manifest (independent of byte size).
+    long_ok_clip = SttStub(
+        manifest={
+            "clips": [
+                {
+                    "id": "fx-long-ok",
+                    "path": "fx-long-ok.ogg",
+                    "expected_transcript": "this would be a long note",
+                    "outcome": "ok",
+                    "confidence": 0.95,
+                    "bytes": 64,
+                    "duration_sec": 180,
+                }
+            ],
+            "max_bytes": 1024,
+            "max_duration_sec": 120,
+        }
+    )
+    over_dur = long_ok_clip.transcribe("fx-long-ok")
+    duration_bound_ok = (
+        over_dur.clarification_needed
+        and over_dur.outcome is SttOutcome.OVERSIZE
+        and (over_dur.meta or {}).get("reason") == "duration"
+    )
+    checks.append(
+        {
+            "id": "unit.stt.duration_bound",
+            "result": "PASS" if duration_bound_ok else "FAIL",
+            "detail": (
+                f"outcome={over_dur.outcome.value} "
+                f"meta={over_dur.meta} clarify={over_dur.clarification_needed}"
+            ),
+        }
+    )
+
+    # TTS policy: inbound mode speaks only for audio; never mode never speaks.
+    inbound = TtsPolicySpy(mode=TtsMode.INBOUND)
+    never = TtsPolicySpy(mode=TtsMode.NEVER)
+    always = TtsPolicySpy(mode=TtsMode.ALWAYS)
+    tts_ok = (
+        inbound.maybe_speak("hi", inbound_was_audio=True) is True
+        and inbound.maybe_speak("hi", inbound_was_audio=False) is False
+        and never.maybe_speak("hi", inbound_was_audio=True) is False
+        and always.maybe_speak("hi", inbound_was_audio=False) is True
+        and inbound.speak_count == 1
+        and never.speak_count == 0
+        and always.speak_count == 1
+    )
+    checks.append(
+        {
+            "id": "unit.tts.mode_policy",
+            "result": "PASS" if tts_ok else "FAIL",
+            "detail": (
+                f"inbound={inbound.snapshot()} never={never.speak_count} "
+                f"always={always.speak_count}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_models_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Models router: fixture table, Luna default, Terra/Sol escalation, stub registry."""
+    checks: list[dict[str, Any]] = []
+    fixture_path = root / "fixtures" / "models" / "routing-intents.json"
+    fixture = load_routing_fixture(fixture_path)
+    cases = fixture.get("cases", [])
+    fixture_ok = fixture_path.is_file() and len(cases) >= 10
+    checks.append(
+        {
+            "id": "unit.models.fixture_pack",
+            "result": "PASS" if fixture_ok else "FAIL",
+            "detail": f"path={fixture_path} cases={len(cases)}",
+        }
+    )
+
+    table_failures: list[str] = []
+    for case in cases:
+        case_id = case.get("id", "?")
+        expected = case.get("expected_model")
+        signals = RoutingSignals.from_dict(case.get("signals") or {})
+        decision = route(signals)
+        if decision.model.value != expected:
+            table_failures.append(
+                f"{case_id}: expected {expected} got {decision.model.value}"
+            )
+    table_ok = not table_failures
+    checks.append(
+        {
+            "id": "unit.models.fixture_table",
+            "result": "PASS" if table_ok else "FAIL",
+            "detail": (
+                f"all {len(cases)} cases match"
+                if table_ok
+                else "; ".join(table_failures[:5])
+            ),
+        }
+    )
+
+    luna_dec = route(RoutingSignals(intent="reminder", utterance="Remind me at 5"))
+    luna_ok = luna_dec.model is ModelRole.LUNA and not luna_dec.escalated
+    checks.append(
+        {
+            "id": "unit.models.default_luna",
+            "result": "PASS" if luna_ok else "FAIL",
+            "detail": f"model={luna_dec.model.value} escalated={luna_dec.escalated}",
+        }
+    )
+
+    terra_dec = route(
+        RoutingSignals(
+            intent="booking",
+            utterance="retry booking",
+            booking_retry=True,
+        )
+    )
+    sol_dec = route(
+        RoutingSignals(
+            intent="self_mod",
+            utterance="patch three files",
+            self_mod_files=3,
+        )
+    )
+    escalate_ok = (
+        terra_dec.model is ModelRole.TERRA
+        and terra_dec.escalated
+        and sol_dec.model is ModelRole.SOL
+        and sol_dec.escalated
+    )
+    checks.append(
+        {
+            "id": "unit.models.terra_sol_escalation",
+            "result": "PASS" if escalate_ok else "FAIL",
+            "detail": (
+                f"terra={terra_dec.model.value} sol={sol_dec.model.value} "
+                f"terra_reasons={terra_dec.reasons} sol_reasons={sol_dec.reasons}"
+            ),
+        }
+    )
+
+    registry = ModelStubRegistry()
+    luna_stub = registry.complete_as(ModelRole.LUNA, "hello reminder")
+    sol_stub = registry.complete_as(ModelRole.SOL, "deep plan week")
+    stub_ok = (
+        luna_stub.model is ModelRole.LUNA
+        and sol_stub.model is ModelRole.SOL
+        and luna_stub.stub
+        and "[stub:luna]" in luna_stub.text
+        and registry.for_role(ModelRole.LUNA).snapshot()["call_count"] == 1
+    )
+    checks.append(
+        {
+            "id": "unit.models.stub_registry",
+            "result": "PASS" if stub_ok else "FAIL",
+            "detail": (
+                f"luna_text={luna_stub.text!r} sol_model={sol_stub.model.value} "
+                f"snapshot={registry.snapshot()}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_models_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """STT pipeline independent from chat model selection; router + stubs wired."""
+    checks: list[dict[str, Any]] = []
+
+    # Chat model stubs never touch STT; pipeline uses SttStub regardless of router.
+    pipeline = TranscriptionPipeline.from_fixtures(
+        manifest_path=root / "fixtures" / "audio" / "manifest.json"
+    )
+    registry = ModelStubRegistry()
+    chat_dec = route(
+        RoutingSignals(intent="reminder", utterance="Remind me Sunday to call grandma")
+    )
+    chat_completion = registry.complete_as(chat_dec.model, "route then respond")
+    audio_turn = pipeline.process_voice_note(audio_fixture_id="fx-reminder")
+
+    stt_indep_ok = (
+        chat_dec.model is ModelRole.LUNA
+        and chat_completion.model is ModelRole.LUNA
+        and audio_turn.is_transcript_turn
+        and isinstance(pipeline.stt, SttStub)
+        and registry.snapshot()["luna"]["call_count"] == 1
+        and pipeline.stt.snapshot().get("call_count", 0) >= 1
+    )
+    checks.append(
+        {
+            "id": "integration.models.stt_independent_from_chat",
+            "result": "PASS" if stt_indep_ok else "FAIL",
+            "detail": (
+                f"chat={chat_dec.model.value} stt_type={type(pipeline.stt).__name__} "
+                f"transcript_turn={audio_turn.is_transcript_turn} "
+                f"stt_calls={pipeline.stt.snapshot().get('call_count')}"
+            ),
+        }
+    )
+
+    # Escalated planning path uses Sol stub without changing STT config.
+    sol_signals = RoutingSignals(
+        intent="planning",
+        utterance="Give me a deep plan for travel and meals",
+        multi_day_plan=True,
+        has_calendar_constraints=True,
+        has_diet_constraints=True,
+        has_travel_constraints=True,
+    )
+    sol_dec = route(sol_signals)
+    sol_completion = registry.complete_as(sol_dec.model, "weekly plan draft")
+    pipeline2 = TranscriptionPipeline.from_fixtures(
+        manifest_path=root / "fixtures" / "audio" / "manifest.json"
+    )
+    clarify = pipeline2.process_voice_note(audio_fixture_id="fx-empty")
+    escalate_path_ok = (
+        sol_dec.model is ModelRole.SOL
+        and sol_completion.model is ModelRole.SOL
+        and clarify.is_clarification
+        and isinstance(pipeline2.stt, SttStub)
+        and pipeline2.stt is not pipeline.stt
+    )
+    checks.append(
+        {
+            "id": "integration.models.sol_planning_with_stt_stub",
+            "result": "PASS" if escalate_path_ok else "FAIL",
+            "detail": (
+                f"sol_dec={sol_dec.model.value} sol_stub={sol_completion.model.value} "
+                f"clarify={clarify.is_clarification} stt={pipeline2.stt.snapshot()}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_reminder_unit_checks() -> list[dict[str, Any]]:
+    """One-shot NL due times, recurring weekly across DST, snooze/cancel."""
+    checks: list[dict[str, Any]] = []
+    tz_name = "Europe/Madrid"
+    tz = ZoneInfo(tz_name)
+    # E2E-01 setup: Monday 10:00 local.
+    monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+    utterance = "Remind me Sunday at 18:00 to call grandma."
+    parsed = parse_reminder(utterance, now=monday, timezone=tz_name)
+    expected_due = datetime(2026, 1, 11, 18, 0, 0, tzinfo=tz)
+    oneshot_ok = (
+        parsed.kind == "one_shot"
+        and parsed.body.lower() == "call grandma"
+        and parsed.due_at == expected_due
+        and parsed.weekday == 6
+        and parsed.hour == 18
+        and parsed.minute == 0
+    )
+    checks.append(
+        {
+            "id": "unit.reminder.oneshot_nl_due",
+            "result": "PASS" if oneshot_ok else "FAIL",
+            "detail": (
+                f"kind={parsed.kind} due={parsed.due_at.isoformat()} "
+                f"expected={expected_due.isoformat()} body={parsed.body!r}"
+            ),
+        }
+    )
+
+    # Audio-prefixed transcript still parses (E2E-01 STT turn body).
+    audio_utt = "[Audio] Remind me Sunday at 18:00 to call grandma."
+    audio_parsed = parse_reminder(audio_utt, now=monday, timezone=tz_name)
+    audio_ok = audio_parsed.due_at == expected_due and audio_parsed.body.lower() == "call grandma"
+    checks.append(
+        {
+            "id": "unit.reminder.parse_audio_prefix",
+            "result": "PASS" if audio_ok else "FAIL",
+            "detail": f"due={audio_parsed.due_at.isoformat()} body={audio_parsed.body!r}",
+        }
+    )
+
+    # Recurring weekly stable across Europe/Madrid DST spring-forward.
+    pre_dst = datetime(2026, 3, 22, 18, 0, 0, tzinfo=tz)  # Sunday CET
+    post = next_weekly_after(pre_dst, weekday=6, hour=18, minute=0)
+    dst_ok = (
+        post.weekday() == 6
+        and post.hour == 18
+        and post.minute == 0
+        and post.tzinfo is not None
+        and post.utcoffset() != pre_dst.utcoffset()
+    )
+    checks.append(
+        {
+            "id": "unit.reminder.recurring_weekly_dst",
+            "result": "PASS" if dst_ok else "FAIL",
+            "detail": (
+                f"pre={pre_dst.isoformat()} post={post.isoformat()} "
+                f"offsets={pre_dst.utcoffset()}→{post.utcoffset()}"
+            ),
+        }
+    )
+
+    # Recurring parse: every Sunday.
+    every = parse_reminder(
+        "every Sunday remind me to call grandma",
+        now=monday,
+        timezone=tz_name,
+    )
+    every_ok = every.kind == "recurring" and every.weekday == 6 and every.due_at == expected_due
+    checks.append(
+        {
+            "id": "unit.reminder.recurring_every_sunday",
+            "result": "PASS" if every_ok else "FAIL",
+            "detail": f"kind={every.kind} due={every.due_at.isoformat()}",
+        }
+    )
+
+    # Auto tier mapping for reminder/habit create.
+    tier_ok = (
+        tier_for("reminder_create") == ApprovalTier.AUTO
+        and tier_for("habit_create") == ApprovalTier.AUTO
+    )
+    checks.append(
+        {
+            "id": "unit.reminder.auto_approval_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": (
+                f"reminder_create={tier_for('reminder_create').value} "
+                f"habit_create={tier_for('habit_create').value}"
+            ),
+        }
+    )
+
+    # Snooze / cancel state machine (unit on store).
+    store = ReminderStore()
+    clock = FakeClock(start=monday.astimezone(ZoneInfo("UTC")))
+    rem = store.create(
+        text="call grandma",
+        timezone=tz_name,
+        kind=ReminderKind.ONE_SHOT,
+        due_at=expected_due,
+        created_at=clock.now(),
+        hour=18,
+        minute=0,
+        weekday=6,
+        recipient="+15550001111",
+    )
+    snooze_until = expected_due + timedelta(hours=1)
+    store.snooze(rem.id, snooze_until)
+    snoozed = store.get(rem.id)
+    snooze_status = snoozed.status if snoozed else None
+    snooze_due = snoozed.due_at if snoozed else None
+    store.cancel(rem.id)
+    cancelled = store.get(rem.id)
+    sc_ok = (
+        snooze_status == ReminderStatus.SNOOZED
+        and snooze_due == snooze_until
+        and cancelled is not None
+        and cancelled.status == ReminderStatus.CANCELLED
+        and rem.id not in {r.id for r in store.due(snooze_until + timedelta(seconds=1))}
+    )
+    checks.append(
+        {
+            "id": "unit.reminder.snooze_cancel",
+            "result": "PASS" if sc_ok else "FAIL",
+            "detail": (
+                f"snooze={snooze_status.value if snooze_status else None} "
+                f"cancel={cancelled.status.value if cancelled else None}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_reminder_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Create + confirm outbound; fire via FakeClock.advance; habit WhatsApp first step."""
+    checks: list[dict[str, Any]] = []
+    tz_name = "Europe/Madrid"
+    tz = ZoneInfo(tz_name)
+    owner = "+15550001111"
+    seed_path = root / "fixtures" / "memory" / "seed-profile.json"
+    seed = json.loads(seed_path.read_text(encoding="utf-8"))
+    seed_tz = seed.get("identity", {}).get("timezone") or tz_name
+
+    # E2E-01-shaped: Monday 10:00 → create from transcript → confirm; no hard approval.
+    monday_local = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+    clock = FakeClock(start=monday_local)
+    catcher = OutboundMessageCatcher()
+    store = ReminderStore()
+    gw = ActionGateway(clock=clock, reminders=store)
+    svc = ReminderService(
+        store=store,
+        clock=clock,
+        catcher=catcher,
+        gateway=gw,
+        timezone=seed_tz,
+        recipient=owner,
+    )
+    created = svc.create_from_utterance(
+        "Remind me Sunday at 18:00 to call grandma.",
+        timezone=seed_tz,
+    )
+    expected_due = datetime(2026, 1, 11, 18, 0, 0, tzinfo=tz)
+    pending_approvals = gw.approvals.list(status=ApprovalStatus.PENDING)
+    hard_items = [
+        i
+        for i in gw.approvals.list()
+        if i.action_type in {"reminder_create", "habit_create"}
+    ]
+    create_ok = (
+        created.ok
+        and created.reminder is not None
+        and created.reminder.due_at == expected_due
+        and created.tier == "auto"
+        and created.approval_id is None
+        and catcher.count() == 1
+        and catcher.messages[0].meta.get("kind") == "reminder_confirm"
+        and "call grandma" in catcher.messages[0].body.lower()
+        and len(hard_items) == 0
+        and len(pending_approvals) == 0
+        and seed_tz == "Europe/Madrid"
+    )
+    checks.append(
+        {
+            "id": "integration.reminder.e2e01_create_confirm",
+            "result": "PASS" if create_ok else "FAIL",
+            "detail": (
+                f"ok={created.ok} due={created.reminder.due_at.isoformat() if created.reminder else None} "
+                f"tier={created.tier} approval_id={created.approval_id} "
+                f"outbound={catcher.count()} hard_items={len(hard_items)} "
+                f"seed_tz={seed_tz}"
+            ),
+        }
+    )
+
+    # Advance fake clock to due → fire reminder outbound (no wall sleep).
+    assert created.reminder is not None
+    delta = expected_due - clock.now()
+    scheduler = ReminderScheduler(
+        store, clock, catcher, kill=gw.kill, default_recipient=owner
+    )
+    fires = scheduler.advance(delta)
+    rem_after = store.get(created.reminder.id)
+    fire_ok = (
+        len(fires) == 1
+        and fires[0].emitted
+        and fires[0].reason == "ok"
+        and rem_after is not None
+        and rem_after.status == ReminderStatus.FIRED
+        and rem_after.fire_count == 1
+        and any(m.meta.get("kind") == "reminder_fire" for m in catcher.messages)
+        and any("Reminder: call grandma" == m.body for m in catcher.messages)
+    )
+    checks.append(
+        {
+            "id": "integration.reminder.clock_advance_fire",
+            "result": "PASS" if fire_ok else "FAIL",
+            "detail": (
+                f"fires={len(fires)} status={rem_after.status.value if rem_after else None} "
+                f"fire_count={rem_after.fire_count if rem_after else None} "
+                f"outbound={catcher.count()}"
+            ),
+        }
+    )
+
+    # Habit scaffolding: high-priority recurring → WhatsApp first escalation step.
+    clock2 = FakeClock(start=monday_local)
+    catcher2 = OutboundMessageCatcher()
+    store2 = ReminderStore()
+    gw2 = ActionGateway(clock=clock2, reminders=store2)
+    svc2 = ReminderService(
+        store=store2,
+        clock=clock2,
+        catcher=catcher2,
+        gateway=gw2,
+        timezone=tz_name,
+        recipient=owner,
+    )
+    habit_created = svc2.create_from_utterance(
+        "every Sunday at 18:00 remind me to stretch",
+        as_habit=True,
+        habit_priority="high",
+        escalation_enabled=True,
+    )
+    habit = habit_created.habit
+    channel_before = habit.current_channel() if habit else None
+    step_before = habit.escalation_step if habit else None
+    sched2 = ReminderScheduler(
+        store2, clock2, catcher2, kill=gw2.kill, default_recipient=owner
+    )
+    due2 = habit_created.reminder.due_at if habit_created.reminder else expected_due
+    fires2 = sched2.advance(due2 - clock2.now())
+    habit_after = store2.get_habit(habit.id) if habit else None
+    habit_ok = (
+        habit_created.ok
+        and habit is not None
+        and habit.priority == "high"
+        and channel_before is EscalationChannel.WHATSAPP
+        and step_before == 0
+        and len(fires2) == 1
+        and fires2[0].emitted
+        and fires2[0].channel == "whatsapp"
+        and any(m.body.startswith("Habit reminder:") for m in catcher2.messages)
+        and habit_after is not None
+        # After WhatsApp fire without completion, ladder advances toward Android.
+        and habit_after.escalation_step == 1
+        and habit_after.current_channel() is EscalationChannel.ANDROID
+    )
+    checks.append(
+        {
+            "id": "integration.habit.whatsapp_first_step",
+            "result": "PASS" if habit_ok else "FAIL",
+            "detail": (
+                f"ok={habit_created.ok} step_before=0 "
+                f"step_after={habit_after.escalation_step if habit_after else None} "
+                f"channel={fires2[0].channel if fires2 else None} "
+                f"fires={len(fires2)}"
+            ),
+        }
+    )
+
+    # Pause agent blocks proactive reminder fires (capabilities contract case).
+    clock3 = FakeClock(start=monday_local)
+    catcher3 = OutboundMessageCatcher()
+    store3 = ReminderStore()
+    gw3 = ActionGateway(clock=clock3, reminders=store3)
+    svc3 = ReminderService(
+        store=store3, clock=clock3, catcher=catcher3, gateway=gw3, timezone=tz_name, recipient=owner
+    )
+    created3 = svc3.create_from_utterance(
+        "Remind me Sunday at 18:00 to call grandma.",
+        timezone=tz_name,
+    )
+    gw3.pause_agent()
+    sched3 = ReminderScheduler(
+        store3, clock3, catcher3, kill=gw3.kill, default_recipient=owner
+    )
+    assert created3.reminder is not None
+    blocked = sched3.advance(created3.reminder.due_at - clock3.now())
+    pause_ok = (
+        len(blocked) == 1
+        and (not blocked[0].emitted)
+        and blocked[0].reason == "pause_agent"
+        and not any(m.meta.get("kind") == "reminder_fire" for m in catcher3.messages)
+        and store3.get(created3.reminder.id) is not None
+        and store3.get(created3.reminder.id).status == ReminderStatus.ACTIVE
+    )
+    checks.append(
+        {
+            "id": "integration.reminder.pause_stops_fire",
+            "result": "PASS" if pause_ok else "FAIL",
+            "detail": (
+                f"emitted={blocked[0].emitted if blocked else None} "
+                f"reason={blocked[0].reason if blocked else None} "
+                f"fire_msgs={sum(1 for m in catcher3.messages if m.meta.get('kind')=='reminder_fire')}"
+            ),
+        }
+    )
+
+    # Snooze then fire after snooze_until via clock.advance.
+    clock4 = FakeClock(start=monday_local)
+    catcher4 = OutboundMessageCatcher()
+    store4 = ReminderStore()
+    rem4 = store4.create(
+        text="water plants",
+        timezone=tz_name,
+        kind=ReminderKind.ONE_SHOT,
+        due_at=expected_due,
+        created_at=clock4.now(),
+        hour=18,
+        minute=0,
+        weekday=6,
+        recipient=owner,
+    )
+    snooze_until = expected_due + timedelta(hours=2)
+    store4.snooze(rem4.id, snooze_until)
+    sched4 = ReminderScheduler(store4, clock4, catcher4, default_recipient=owner)
+    early = sched4.advance(expected_due - clock4.now())
+    later = sched4.advance(timedelta(hours=2))
+    snooze_fire_ok = (
+        len(early) == 0
+        and len(later) == 1
+        and later[0].emitted
+        and store4.get(rem4.id).status == ReminderStatus.FIRED
+    )
+    checks.append(
+        {
+            "id": "integration.reminder.snooze_then_fire",
+            "result": "PASS" if snooze_fire_ok else "FAIL",
+            "detail": f"early={len(early)} later={len(later)}",
+        }
+    )
+    return checks
+
+
+def _run_todo_unit_checks() -> list[dict[str, Any]]:
+    """Parse todo utterances, store CRUD, dedup near-identical open todos."""
+    checks: list[dict[str, Any]] = []
+
+    parsed = parse_todo("Add todo: buy oat milk.")
+    parse_ok = parsed.title.lower() == "buy oat milk"
+    checks.append(
+        {
+            "id": "unit.todo.parse_add_utterance",
+            "result": "PASS" if parse_ok else "FAIL",
+            "detail": f"title={parsed.title!r}",
+        }
+    )
+
+    audio_parsed = parse_todo("[Audio] Add todo: buy oat milk.")
+    audio_ok = audio_parsed.title.lower() == "buy oat milk"
+    checks.append(
+        {
+            "id": "unit.todo.parse_audio_prefix",
+            "result": "PASS" if audio_ok else "FAIL",
+            "detail": f"title={audio_parsed.title!r}",
+        }
+    )
+
+    intent_ok = looks_like_todo_add("Add a todo: pack for trip") and not looks_like_todo_add(
+        "Remind me Sunday"
+    )
+    checks.append(
+        {
+            "id": "unit.todo.intent_detection",
+            "result": "PASS" if intent_ok else "FAIL",
+            "detail": f"todo={looks_like_todo_add('Add a todo: pack')} rem={looks_like_todo_add('Remind me')}",
+        }
+    )
+
+    tier_ok = (
+        tier_for("todo_add") == ApprovalTier.AUTO
+        and tier_for("todo_complete") == ApprovalTier.AUTO
+    )
+    checks.append(
+        {
+            "id": "unit.todo.auto_approval_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": (
+                f"todo_add={tier_for('todo_add').value} "
+                f"todo_complete={tier_for('todo_complete').value}"
+            ),
+        }
+    )
+
+    clock = FakeClock()
+    store = TodoStore()
+    t1 = store.create(title="Buy oat milk", created_at=clock.now(), created_from=TodoSource.WHATSAPP)
+    open_status = t1.status
+    dup = store.find_open_duplicate("buy oat milk")
+    t2 = store.complete(t1.id, completed_at=clock.now(), completed_from=TodoSource.ANDROID)
+    crud_ok = (
+        t1.id.startswith("todo-")
+        and open_status == TodoStatus.OPEN
+        and dup is not None
+        and dup.id == t1.id
+        and t2.status == TodoStatus.DONE
+        and len(store.list_open()) == 0
+    )
+    checks.append(
+        {
+            "id": "unit.todo.create_list_complete",
+            "result": "PASS" if crud_ok else "FAIL",
+            "detail": (
+                f"id={t1.id} dup={dup.id if dup else None} "
+                f"done={t2.status.value} open={len(store.list_open())}"
+            ),
+        }
+    )
+
+    store2 = TodoStore()
+    store2.create(title="Buy protein powder", created_at=clock.now())
+    near_dup = store2.find_open_duplicate("buy protein powder!")
+    dedup_ok = near_dup is not None and normalize_title(near_dup.title) == normalize_title(
+        "buy protein powder!"
+    )
+    checks.append(
+        {
+            "id": "unit.todo.dedup_near_identical",
+            "result": "PASS" if dedup_ok else "FAIL",
+            "detail": f"found={near_dup.title if near_dup else None}",
+        }
+    )
+
+    return checks
+
+
+def _run_todo_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """WhatsApp todo create → Android projection equality; complete sync; dedup."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    clock = FakeClock()
+    catcher = OutboundMessageCatcher()
+    store = TodoStore()
+    gw = ActionGateway(clock=clock, todos=store)
+    svc = TodoService(store=store, clock=clock, catcher=catcher, gateway=gw, recipient=owner)
+    android = AndroidProjectionApi(store=store, clock=clock, gateway=gw)
+
+    created = svc.create_from_utterance("Add todo: buy oat milk.", recipient=owner)
+    pending = gw.approvals.list(status=ApprovalStatus.PENDING)
+    create_ok = (
+        created.ok
+        and created.todo is not None
+        and created.todo.title.lower() == "buy oat milk"
+        and created.todo.status == TodoStatus.OPEN
+        and created.tier == "auto"
+        and created.approval_id is None
+        and len(pending) == 0
+        and catcher.count() == 1
+        and catcher.messages[0].meta.get("kind") == "todo_confirm"
+    )
+    checks.append(
+        {
+            "id": "integration.todo.whatsapp_create_auto",
+            "result": "PASS" if create_ok else "FAIL",
+            "detail": (
+                f"ok={created.ok} title={created.todo.title if created.todo else None!r} "
+                f"tier={created.tier} outbound={catcher.count()}"
+            ),
+        }
+    )
+
+    assert created.todo is not None
+    projected = android.list_todos()
+    proj = projected[0] if projected else None
+    sync_ok = (
+        proj is not None
+        and proj.id == created.todo.id
+        and proj.title == created.todo.title
+        and proj.status == "open"
+        and android.get_todo(created.todo.id) == proj
+    )
+    checks.append(
+        {
+            "id": "integration.todo.android_projection_equality",
+            "result": "PASS" if sync_ok else "FAIL",
+            "detail": (
+                f"agent_id={created.todo.id} android_id={proj.id if proj else None} "
+                f"title={proj.title if proj else None!r} status={proj.status if proj else None}"
+            ),
+        }
+    )
+
+    completed = android.complete_todo(created.todo.id)
+    store_after = store.get(created.todo.id)
+    complete_ok = (
+        completed.status == "done"
+        and store_after is not None
+        and store_after.status == TodoStatus.DONE
+        and len(android.list_todos(status="open")) == 0
+    )
+    checks.append(
+        {
+            "id": "integration.todo.android_complete_reflects_store",
+            "result": "PASS" if complete_ok else "FAIL",
+            "detail": (
+                f"proj={completed.status} store={store_after.status.value if store_after else None}"
+            ),
+        }
+    )
+
+    # Dedup: second add with same title returns existing open todo (no duplicate row).
+    catcher2 = OutboundMessageCatcher()
+    store3 = TodoStore()
+    gw3 = ActionGateway(clock=clock, todos=store3)
+    svc3 = TodoService(store=store3, clock=clock, catcher=catcher2, gateway=gw3, recipient=owner)
+    first = svc3.create_from_utterance("Add todo: buy oat milk.", recipient=owner)
+    second = svc3.create_from_utterance("Add todo: Buy oat milk.", recipient=owner)
+    dedup_ok = (
+        first.ok
+        and second.ok
+        and second.deduplicated
+        and first.todo is not None
+        and second.todo is not None
+        and first.todo.id == second.todo.id
+        and len(store3.list_open()) == 1
+        and any(m.meta.get("kind") == "todo_dedup" for m in catcher2.messages)
+    )
+    checks.append(
+        {
+            "id": "integration.todo.dedup_whatsapp_readd",
+            "result": "PASS" if dedup_ok else "FAIL",
+            "detail": (
+                f"first={first.todo.id if first.todo else None} "
+                f"second_dedup={second.deduplicated} open={len(store3.list_open())}"
+            ),
+        }
+    )
+
+    # E2E-03 prep via Virtual User harness (full journey).
+    e2e03 = run_e2e_03(
+        root=root,
+        artifacts_dir=root / "artifacts" / "test" / "e2e-03",
+        write_artifacts=True,
+    )
+    checks.append(
+        {
+            "id": "integration.todo.e2e03_virtual_user_journey",
+            "result": e2e03.result,
+            "detail": (
+                f"todo_id={e2e03.todo_id} title={e2e03.title!r} status={e2e03.status} "
+                f"checks={len(e2e03.checks)}"
+            ),
+        }
+    )
+
+    return checks
+
+
+def _run_transcription_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Voice note → STT stub → transcript turn OR clarification via mock WhatsApp."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    pipeline = TranscriptionPipeline.from_fixtures(
+        manifest_path=root / "fixtures" / "audio" / "manifest.json"
+    )
+    catcher = OutboundMessageCatcher()
+    transport = MockWhatsAppTransport(
+        allowlist=[owner],
+        catcher=catcher,
+        pipeline=pipeline,
+        tts_mode=TtsMode.INBOUND,
+    )
+
+    # Happy path: E2E-01 audio fixture → transcript turn + TTS spy speak.
+    voice = transport.inject_audio(owner, audio_fixture_id="fx-reminder")
+    voice_ok = (
+        voice.allowed
+        and voice.transcript == "Remind me Sunday at 18:00 to call grandma."
+        and (voice.turn_body or "").startswith("[Audio] Remind me Sunday")
+        and voice.clarification is None
+        and "agent.respond" in voice.tool_calls
+        and voice.tts_spoken is True
+        and transport.counters.stt_calls == 1
+        and transport.counters.transcript_turns == 1
+        and transport.counters.clarification_asks == 0
+        and catcher.count() == 1
+    )
+    checks.append(
+        {
+            "id": "integration.transcription.voice_to_transcript_turn",
+            "result": "PASS" if voice_ok else "FAIL",
+            "detail": (
+                f"transcript={voice.transcript!r} turn={voice.turn_body!r} "
+                f"tts={voice.tts_spoken} tools={voice.tool_calls} "
+                f"counters={transport.counters.snapshot()}"
+            ),
+        }
+    )
+
+    # Text inbound must not trigger TTS under inbound mode.
+    transport.reset_effects()
+    text = transport.inject_text(owner, "hello text")
+    # default handler does not call TTS for text; policy spy stays at 0
+    text_tts_ok = (
+        text.allowed
+        and transport.pipeline.tts.speak_count == 0
+        and transport.counters.tts_speaks == 0
+        and transport.counters.stt_calls == 0
+    )
+    checks.append(
+        {
+            "id": "integration.transcription.tts_inbound_mode_text_skip",
+            "result": "PASS" if text_tts_ok else "FAIL",
+            "detail": f"tts_calls={transport.pipeline.tts.snapshot()}",
+        }
+    )
+
+    # Empty / garbage / unknown → clarification; zero hard tools.
+    transport.reset_effects()
+    for fid in ("fx-empty", "fx-garbage", "fx-unknown-xyz"):
+        res = transport.inject_audio(owner, audio_fixture_id=fid)
+        if not res.clarification or "agent.clarify" not in res.tool_calls:
+            checks.append(
+                {
+                    "id": "integration.transcription.clarify_on_bad_audio",
+                    "result": "FAIL",
+                    "detail": f"fixture={fid} result={res}",
+                }
+            )
+            break
+    else:
+        hard = [t for t in transport.tool_call_log if t in (
+            "buy", "book", "self_mod_apply", "policy_change", "transfer_money"
+        )]
+        clarify_ok = (
+            transport.counters.clarification_asks >= 3
+            and transport.counters.transcript_turns == 0
+            and not hard
+        )
+        checks.append(
+            {
+                "id": "integration.transcription.clarify_on_bad_audio",
+                "result": "PASS" if clarify_ok else "FAIL",
+                "detail": (
+                    f"clarifies={transport.counters.clarification_asks} "
+                    f"hard={hard} outbound={catcher.count()}"
+                ),
+            }
+        )
+
+    # Low-confidence buy → echo clarify; never silent buy.
+    transport.reset_effects()
+    risky = transport.inject_audio(owner, audio_fixture_id="fx-unclear-buy")
+    risky_ok = (
+        risky.clarification is not None
+        and "buy" in (risky.clarification or "").lower()
+        and "agent.clarify" in risky.tool_calls
+        and "buy" not in transport.tool_call_log
+        and risky.tts_spoken is False
+    )
+    checks.append(
+        {
+            "id": "integration.transcription.low_confidence_hard_action_clarify",
+            "result": "PASS" if risky_ok else "FAIL",
+            "detail": f"clarification={risky.clarification!r} tools={risky.tool_calls}",
+        }
+    )
+
+    # IngressSimulator wiring: audio fixture id path.
+    sim = IngressSimulator(
+        allowlist=[owner],
+        catcher=OutboundMessageCatcher(),
+        pipeline=TranscriptionPipeline.from_fixtures(
+            manifest_path=root / "fixtures" / "audio" / "manifest.json"
+        ),
+    )
+    sim_res = sim.handle_audio(owner, audio_fixture_id="fx-todo")
+    sim_ok = (
+        sim_res.allowed
+        and sim_res.transcript == "Add todo: buy oat milk"
+        and (sim_res.turn_body or "").startswith("[Audio]")
+        and sim.counters.stt_calls == 1
+    )
+    checks.append(
+        {
+            "id": "integration.transcription.ingress_sim_audio",
+            "result": "PASS" if sim_ok else "FAIL",
+            "detail": (
+                f"transcript={sim_res.transcript!r} turn={sim_res.turn_body!r} "
+                f"stt_calls={sim.counters.stt_calls}"
+            ),
+        }
+    )
+
+    return checks
+
+
+def _run_memory_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Memory profile R/W — explicit remember, hot load, episodic, restart durability."""
+    checks: list[dict[str, Any]] = []
+    fixture = root / "fixtures" / "memory" / "seed-profile.json"
+
+    with tempfile.TemporaryDirectory(prefix="task04-mem-") as tmp:
+        mem_root = Path(tmp) / "memory"
+        store = MemoryStore.seed_from_fixture(mem_root, fixture)
+
+        # Hot profile on turn includes identity facts.
+        hot = store.load_hot_profile()
+        ctx_lines = store.hot_context_lines()
+        hot_ok = (
+            hot.get("identity", {}).get("name") == "Alex"
+            and "grandma" in hot.get("identity", {}).get("household", "").lower()
+            and any("Allergies" in line for line in ctx_lines)
+        )
+        checks.append(
+            {
+                "id": "integration.memory.hot_profile_turn",
+                "result": "PASS" if hot_ok else "FAIL",
+                "detail": f"name={hot.get('identity', {}).get('name')} lines={ctx_lines}",
+            }
+        )
+
+        # Diet constraints for planner input assembly.
+        constraints = store.planning_constraints()
+        diet_ok = (
+            "peanuts" in constraints.get("allergies", [])
+            and "shellfish" in constraints.get("food_dislikes", [])
+            and constraints.get("diet_phase") == "low carb"
+        )
+        checks.append(
+            {
+                "id": "integration.memory.diet_constraints",
+                "result": "PASS" if diet_ok else "FAIL",
+                "detail": str(constraints),
+            }
+        )
+
+        # Explicit remember persists across harness reboot (new store handle).
+        store.remember("goals", "diet_phase", "low carb — no rice", explicit=True)
+        store.append_episode("User asked to remember Sunday grandma call", tags=["ritual"])
+        reopened = MemoryStore.open(mem_root)
+        reboot_hot = reopened.load_hot_profile()
+        episodes = reopened.read_episodes(limit=5)
+        reboot_ok = (
+            reboot_hot.get("goals", {}).get("diet_phase") == "low carb — no rice"
+            and len(episodes) == 1
+            and "grandma" in episodes[0].get("summary", "").lower()
+        )
+        checks.append(
+            {
+                "id": "integration.memory.remember_persists_restart",
+                "result": "PASS" if reboot_ok else "FAIL",
+                "detail": (
+                    f"diet={reboot_hot.get('goals', {}).get('diet_phase')} "
+                    f"episodes={len(episodes)}"
+                ),
+            }
+        )
+
+        # Secrets must not land in memory files.
+        secret_blocked = False
+        try:
+            reopened.remember("preferences", "leak", "token: supersecret123")
+        except MemorySecretsError:
+            secret_blocked = True
+        disk = (
+            reopened.profile_path.read_text(encoding="utf-8")
+            + reopened.episodes_path.read_text(encoding="utf-8")
+        )
+        secrets_ok = secret_blocked and "supersecret123" not in disk
+        checks.append(
+            {
+                "id": "integration.memory.secrets_not_on_disk",
+                "result": "PASS" if secrets_ok else "FAIL",
+                "detail": f"secret_blocked={secret_blocked}",
+            }
+        )
+
+    return checks
+
+
+def _run_task05_hosting_checks(root: Path) -> list[dict[str, Any]]:
+    """E2E-10 prep: durable approvals survive harness Gateway restart."""
+    checks: list[dict[str, Any]] = []
+
+    # Config templates loadable (harness JSON profile + backup manifest).
+    profile = load_gateway_profile(root / "config" / "gateway.harness.json")
+    paths = gateway_data_paths(profile)
+    backup_manifest = root / "config" / "backup.example.json"
+    config_ok = (
+        profile.get("gateway", {}).get("mode") == "harness"
+        and paths["approvals"].name == "items.json"
+        and backup_manifest.exists()
+    )
+    checks.append(
+        {
+            "id": "integration.hosting.config_profile",
+            "result": "PASS" if config_ok else "FAIL",
+            "detail": (
+                f"mode={profile.get('gateway', {}).get('mode')} "
+                f"approvals={paths['approvals']} backup_manifest={backup_manifest.exists()}"
+            ),
+        }
+    )
+
+    with tempfile.TemporaryDirectory(prefix="task05-hosting-") as tmp:
+        mem_root = Path(tmp)
+        approvals_path = mem_root / "approvals" / "items.json"
+        clock = FakeClock()
+
+        # Phase 1: create pending purchase approval (E2E-10 step 1).
+        gw1 = ActionGateway(clock=clock, approvals_path=approvals_path)
+        prop = gw1.propose(
+            "buy",
+            "protein powder purchase",
+            {"sku": "protein-powder", "price": 42.0},
+            estimated_cost=42.0,
+        )
+        approval_id = prop.approval_id
+        pending_before = gw1.approvals.list(status=ApprovalStatus.PENDING)
+        disk_ok = approvals_path.exists()
+
+        # Phase 2: simulate Gateway restart — new process, reopen store (E2E-10 step 2).
+        gw2 = ActionGateway(clock=clock, approvals_path=approvals_path)
+        reopened = gw2.approvals.get(approval_id or "")
+        pending_after = gw2.approvals.list(status=ApprovalStatus.PENDING)
+
+        restart_ok = (
+            prop.ok
+            and approval_id is not None
+            and disk_ok
+            and len(pending_before) == 1
+            and reopened is not None
+            and reopened.status == ApprovalStatus.PENDING
+            and len(pending_after) == 1
+            and pending_after[0].id == approval_id
+        )
+        checks.append(
+            {
+                "id": "integration.hosting.approval_survives_restart",
+                "result": "PASS" if restart_ok else "FAIL",
+                "detail": (
+                    f"approval_id={approval_id} disk={disk_ok} "
+                    f"pending_before={len(pending_before)} "
+                    f"pending_after={len(pending_after)} "
+                    f"status={reopened.status.value if reopened else None}"
+                ),
+            }
+        )
+
+        # Phase 3: Accept still works once; no duplicate execute (E2E-10 step 3).
+        gw2.accept(approval_id or "")
+        first = gw2.execute(approval_id or "")
+        second = gw2.execute(approval_id or "")
+        gw3 = ActionGateway(clock=clock, approvals_path=approvals_path)
+        final_item = gw3.approvals.get(approval_id or "")
+
+        accept_once_ok = (
+            first.ok
+            and gw2.commerce.buy_count == 1
+            and (not second.ok)
+            and final_item is not None
+            and final_item.status == ApprovalStatus.EXECUTED
+        )
+        checks.append(
+            {
+                "id": "integration.hosting.accept_once_after_restart",
+                "result": "PASS" if accept_once_ok else "FAIL",
+                "detail": (
+                    f"first={first.ok} second={second.ok} "
+                    f"buy_count={gw2.commerce.buy_count} "
+                    f"status={final_item.status.value if final_item else None}"
+                ),
+            }
+        )
+
+        # GatewayHarness wrapper restart path (same checks via harness API).
+        harness_profile = {
+            "gateway": {"name": "task05", "mode": "harness"},
+            "data_root": str(mem_root),
+            "paths": {"approvals": str(approvals_path)},
+        }
+        h1 = GatewayHarness(clock=clock, profile=harness_profile)
+        h2 = h1.restart()
+        harness_ok = h2.gateway.approvals.get(approval_id or "") is not None
+        checks.append(
+            {
+                "id": "integration.hosting.gateway_harness_restart",
+                "result": "PASS" if harness_ok else "FAIL",
+                "detail": f"reopened_via_harness={harness_ok}",
+            }
+        )
+
+    return checks
 
 
 def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> int:
@@ -352,7 +1637,14 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                 ],
                 "artifacts": [
                     "artifacts/test/ci/",
+                    "artifacts/test/e2e-01/",
                     "artifacts/test/task-03/",
+                    "artifacts/test/task-04/",
+                    "artifacts/test/task-05/",
+                    "artifacts/test/task-06/",
+                    "artifacts/test/task-07/",
+                    "artifacts/test/task-09/",
+                    "artifacts/test/task-10/",
                 ],
             },
         },
@@ -361,9 +1653,9 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     # Compact stamp for autonomous verification loops.
     stamp = {
         "claim": (
-            "WhatsApp ingress: allowlisted DM only; groups off; "
-            "non-allowlisted → zero tools/outbound; INV-INGRESS-001/002 adversarial; "
-            "003 scaffold; fail-closed on broken INV"
+            "WhatsApp ingress + memory R/W + transcription + reminders/habits + "
+            "E2E-01 Virtual User voice reminder gate: allowlisted DM; "
+            "voice→transcript/clarify; Auto reminder create; fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -374,7 +1666,14 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         ],
         "artifacts": [
             "artifacts/test/ci/report.json",
+            "artifacts/test/e2e-01/verification.json",
             "artifacts/test/task-03/verification.json",
+            "artifacts/test/task-04/verification.json",
+            "artifacts/test/task-05/verification.json",
+            "artifacts/test/task-06/verification.json",
+            "artifacts/test/task-07/verification.json",
+            "artifacts/test/task-09/verification.json",
+            "artifacts/test/task-10/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -382,6 +1681,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             if L["layer"] == "contract"
             for c in L.get("checks", [])
         ],
+        "gate_e2e": ["E2E-01"],
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",
@@ -534,6 +1834,588 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         + "\n",
         encoding="utf-8",
     )
+
+    # TASK-04 personal memory artifacts.
+    task04 = ROOT / "artifacts" / "test" / "task-04"
+    task04.mkdir(parents=True, exist_ok=True)
+    mem_ids = [
+        c.get("id")
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-MEM-")
+    ]
+    mem_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.memory.")
+    ]
+    mem_pass = (
+        all(c.get("result") == "PASS" for c in mem_integration) if mem_integration else False
+    ) and (all(c.get("result") == "PASS" for c in [
+        c for L in layers if L["layer"] == "contract" for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-MEM-")
+    ]) if mem_ids else True)
+    write_report(
+        task04,
+        layer="task-04",
+        result="PASS"
+        if (overall == "PASS" and mem_pass)
+        else ("FAIL" if not broken else overall),
+        checks=mem_integration,
+        extra={
+            "broken_allow_all": broken,
+            "memory_invariant_ids": mem_ids,
+            "ci_overall": overall,
+            "fixture": "fixtures/memory/seed-profile.json",
+            "agent_b_rerun": {
+                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                "fail_closed_proof": [
+                    "./scripts/test-ci.sh --break-invariant",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": "artifacts/test/task-04/",
+            },
+        },
+    )
+    (task04 / "verification.json").write_text(
+        json.dumps(
+            {
+                "claim": (
+                    "Hot profile loadable; explicit remember + episodic persist across restart; "
+                    "INV-MEM-001 rejects secrets in memory files"
+                ),
+                "result": "PASS"
+                if (overall == "PASS" and mem_pass)
+                else ("FAIL" if not broken else overall),
+                "ci_overall": overall,
+                "memory_invariants": mem_ids,
+                "integration_checks": [c.get("id") for c in mem_integration],
+                "commands": ["./scripts/test-ci.sh", "make test-ci"],
+                "artifacts": [
+                    "artifacts/test/task-04/report.json",
+                    "artifacts/test/task-04/verification.json",
+                    "fixtures/memory/seed-profile.json",
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # TASK-05 hosting / reboot durability artifacts.
+    task05 = ROOT / "artifacts" / "test" / "task-05"
+    task05.mkdir(parents=True, exist_ok=True)
+    hosting_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.hosting.")
+    ]
+    hosting_pass = (
+        all(c.get("result") == "PASS" for c in hosting_integration)
+        if hosting_integration
+        else False
+    )
+    write_report(
+        task05,
+        layer="task-05",
+        result="PASS"
+        if (overall == "PASS" and hosting_pass)
+        else ("FAIL" if not broken else overall),
+        checks=hosting_integration,
+        extra={
+            "broken_allow_all": broken,
+            "ci_overall": overall,
+            "e2e_flow": "E2E-10 (restart mid-flight) — prep",
+            "config": [
+                "config/gateway.harness.json",
+                "config/gateway.example.yaml",
+                "config/backup.example.json",
+            ],
+            "agent_b_rerun": {
+                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                "fail_closed_proof": [
+                    "./scripts/test-ci.sh --break-invariant",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": "artifacts/test/task-05/",
+            },
+        },
+    )
+    (task05 / "verification.json").write_text(
+        json.dumps(
+            {
+                "claim": (
+                    "Gateway config skeleton + durable approval store survives harness "
+                    "restart; Accept works once (E2E-10 prep)"
+                ),
+                "result": "PASS"
+                if (overall == "PASS" and hosting_pass)
+                else ("FAIL" if not broken else overall),
+                "ci_overall": overall,
+                "e2e_flow": "E2E-10",
+                "integration_checks": [c.get("id") for c in hosting_integration],
+                "commands": ["./scripts/test-ci.sh", "make test-ci"],
+                "artifacts": [
+                    "artifacts/test/task-05/report.json",
+                    "artifacts/test/task-05/verification.json",
+                    "config/gateway.harness.json",
+                    "config/backup.example.json",
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # TASK-06 transcription pipeline artifacts.
+    task06 = ROOT / "artifacts" / "test" / "task-06"
+    task06.mkdir(parents=True, exist_ok=True)
+    transcription_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith(("unit.stt.", "unit.tts."))
+    ]
+    transcription_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.transcription.")
+    ]
+    ingress_003 = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if c.get("id") == "INV-INGRESS-003"
+    ]
+    task06_checks = transcription_unit + transcription_integration + ingress_003
+    task06_pass = (
+        all(c.get("result") == "PASS" for c in task06_checks) if task06_checks else False
+    )
+    # Capture outbound sample from a voice turn for artifact convention.
+    voice_catcher = OutboundMessageCatcher()
+    voice_transport = MockWhatsAppTransport(
+        allowlist=["+15550001111"],
+        catcher=voice_catcher,
+        pipeline=TranscriptionPipeline.from_fixtures(),
+    )
+    voice_transport.inject_audio("+15550001111", audio_fixture_id="fx-reminder")
+    voice_catcher.write_json(task06 / "outbound-messages.json")
+    write_report(
+        task06,
+        layer="task-06",
+        result="PASS"
+        if (overall == "PASS" and task06_pass)
+        else ("FAIL" if not broken else overall),
+        checks=task06_checks or flat_checks,
+        extra={
+            "broken_allow_all": broken,
+            "ci_overall": overall,
+            "e2e_flow": "E2E-01 (voice reminder) — STT dependency ready",
+            "fixture_manifest": "fixtures/audio/manifest.json",
+            "inv_ingress_003": [c.get("result") for c in ingress_003],
+            "agent_b_rerun": {
+                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                "fail_closed_proof": [
+                    "./scripts/test-ci.sh --break-invariant",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": "artifacts/test/task-06/",
+            },
+        },
+    )
+    (task06 / "verification.json").write_text(
+        json.dumps(
+            {
+                "claim": (
+                    "WhatsApp voice notes pass through STT stub; transcript turn or "
+                    "clarification (INV-INGRESS-003); TTS inbound-mode policy; "
+                    "E2E-01 audio fixture mapped"
+                ),
+                "result": "PASS"
+                if (overall == "PASS" and task06_pass)
+                else ("FAIL" if not broken else overall),
+                "ci_overall": overall,
+                "e2e_flow": "E2E-01",
+                "fixture": "fixtures/audio/manifest.json",
+                "unit_checks": [c.get("id") for c in transcription_unit],
+                "integration_checks": [c.get("id") for c in transcription_integration],
+                "invariants": ["INV-INGRESS-003"],
+                "commands": [
+                    "./scripts/test-ci.sh",
+                    "make test-ci",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": [
+                    "artifacts/test/task-06/report.json",
+                    "artifacts/test/task-06/verification.json",
+                    "artifacts/test/task-06/outbound-messages.json",
+                    "fixtures/audio/manifest.json",
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # TASK-07 reminders + habits artifacts.
+    # Fail-closed (--break-invariant) must not stomp happy-path task-07 evidence:
+    # INV break is expected overall FAIL; reminder checks are independent.
+    reminder_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.reminder.")
+    ]
+    reminder_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith(("integration.reminder.", "integration.habit."))
+    ]
+    task07_checks = reminder_unit + reminder_integration
+    task07_pass = (
+        all(c.get("result") == "PASS" for c in task07_checks) if task07_checks else False
+    )
+    if not broken:
+        task07 = ROOT / "artifacts" / "test" / "task-07"
+        task07.mkdir(parents=True, exist_ok=True)
+        # Capture confirm + fire outbound sample for artifact convention (E2E-01 prep).
+        tz = ZoneInfo("Europe/Madrid")
+        monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+        demo_clock = FakeClock(start=monday)
+        demo_catcher = OutboundMessageCatcher()
+        demo_store = ReminderStore()
+        demo_gw = ActionGateway(clock=demo_clock, reminders=demo_store)
+        demo_svc = ReminderService(
+            store=demo_store,
+            clock=demo_clock,
+            catcher=demo_catcher,
+            gateway=demo_gw,
+            timezone="Europe/Madrid",
+            recipient="+15550001111",
+        )
+        demo = demo_svc.create_from_utterance(
+            "Remind me Sunday at 18:00 to call grandma.",
+            timezone="Europe/Madrid",
+        )
+        if demo.reminder is not None:
+            demo_sched = ReminderScheduler(
+                demo_store,
+                demo_clock,
+                demo_catcher,
+                kill=demo_gw.kill,
+                default_recipient="+15550001111",
+            )
+            demo_sched.advance(demo.reminder.due_at - demo_clock.now())
+        demo_catcher.write_json(task07 / "outbound-messages.json")
+        (task07 / "reminders.json").write_text(
+            json.dumps(demo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            task07,
+            layer="task-07",
+            result="PASS" if task07_pass else "FAIL",
+            checks=task07_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": (
+                    "E2E-01 (voice reminder) — create/fire ready; "
+                    "E2E-02 habit ladder scaffold"
+                ),
+                "seed_timezone": "Europe/Madrid",
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-07/",
+                },
+            },
+        )
+        (task07 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "One-shot + recurring reminders via FakeClock.advance; "
+                        "outbound confirm/fire captured; habit WhatsApp-first "
+                        "escalation scaffold; reminder_create is Auto "
+                        "(no hard approval); E2E-01 ready"
+                    ),
+                    "result": "PASS" if task07_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-01",
+                    "e2e_prep": "E2E-02",
+                    "seed_timezone": "Europe/Madrid",
+                    "unit_checks": [c.get("id") for c in reminder_unit],
+                    "integration_checks": [c.get("id") for c in reminder_integration],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-07/report.json",
+                        "artifacts/test/task-07/verification.json",
+                        "artifacts/test/task-07/outbound-messages.json",
+                        "artifacts/test/task-07/reminders.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-09 models router artifacts.
+    models_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.models.")
+    ]
+    models_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.models.")
+    ]
+    model_invariants = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-MODEL-")
+    ]
+    task09_checks = models_unit + models_integration + model_invariants
+    task09_pass = (
+        all(c.get("result") == "PASS" for c in task09_checks) if task09_checks else False
+    )
+    if not broken:
+        task09 = ROOT / "artifacts" / "test" / "task-09"
+        task09.mkdir(parents=True, exist_ok=True)
+        # Sample routing decisions for artifact convention (no live Luna).
+        routing_sample = []
+        fixture_path = ROOT / "fixtures" / "models" / "routing-intents.json"
+        fixture = load_routing_fixture(fixture_path)
+        for case in fixture.get("cases", []):
+            signals = RoutingSignals.from_dict(case.get("signals") or {})
+            decision = route(signals)
+            routing_sample.append(
+                {
+                    "id": case.get("id"),
+                    "expected_model": case.get("expected_model"),
+                    "decision": decision.to_dict(),
+                }
+            )
+        (task09 / "routing-decisions.json").write_text(
+            json.dumps({"cases": routing_sample}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        registry = ModelStubRegistry()
+        for role in ModelRole:
+            registry.complete_as(role, f"sample prompt for {role.value}")
+        (task09 / "stub-snapshot.json").write_text(
+            json.dumps(registry.snapshot(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            task09,
+            layer="task-09",
+            result="PASS" if task09_pass else "FAIL",
+            checks=task09_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "fixture": "fixtures/models/routing-intents.json",
+                "model_invariants": [c.get("id") for c in model_invariants],
+                "no_live_luna_in_ci": True,
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-09/",
+                },
+            },
+        )
+        (task09 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "Luna default routing; Terra/Sol escalation for hard planning "
+                        "and self-mod; STT stub independent from chat model; "
+                        "no live Luna in CI"
+                    ),
+                    "result": "PASS" if task09_pass else "FAIL",
+                    "ci_overall": overall,
+                    "fixture": "fixtures/models/routing-intents.json",
+                    "unit_checks": [c.get("id") for c in models_unit],
+                    "integration_checks": [c.get("id") for c in models_integration],
+                    "invariants": [c.get("id") for c in model_invariants],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-09/report.json",
+                        "artifacts/test/task-09/verification.json",
+                        "artifacts/test/task-09/routing-decisions.json",
+                        "artifacts/test/task-09/stub-snapshot.json",
+                        "fixtures/models/routing-intents.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-10 todos + Android projection artifacts.
+    todo_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.todo.")
+    ]
+    todo_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.todo.")
+    ]
+    task10_checks = todo_unit + todo_integration
+    task10_pass = (
+        all(c.get("result") == "PASS" for c in task10_checks) if task10_checks else False
+    )
+    if not broken:
+        task10 = ROOT / "artifacts" / "test" / "task-10"
+        task10.mkdir(parents=True, exist_ok=True)
+        e2e03_demo = run_e2e_03(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "e2e-03",
+            write_artifacts=True,
+        )
+        demo_clock = FakeClock()
+        demo_store = TodoStore()
+        demo_gw = ActionGateway(clock=demo_clock, todos=demo_store)
+        demo_catcher = OutboundMessageCatcher()
+        demo_svc = TodoService(
+            store=demo_store,
+            clock=demo_clock,
+            catcher=demo_catcher,
+            gateway=demo_gw,
+            recipient="+15550001111",
+        )
+        demo_android = AndroidProjectionApi(
+            store=demo_store, clock=demo_clock, gateway=demo_gw
+        )
+        demo_created = demo_svc.create_from_utterance("Add todo: buy oat milk.")
+        demo_proj = demo_android.list_todos()
+        (task10 / "todos.json").write_text(
+            json.dumps(demo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (task10 / "android-projection.json").write_text(
+            json.dumps(
+                {
+                    "before_complete": [p.to_dict() for p in demo_proj],
+                    "e2e03": {
+                        "result": e2e03_demo.result,
+                        "todo_id": e2e03_demo.todo_id,
+                        "title": e2e03_demo.title,
+                        "status": e2e03_demo.status,
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        demo_catcher.write_json(task10 / "outbound-messages.json")
+        write_report(
+            task10,
+            layer="task-10",
+            result="PASS" if task10_pass else "FAIL",
+            checks=task10_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-03 (prep — gate in TASK-12)",
+                "demo_todo_id": demo_created.todo.id if demo_created.todo else None,
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-10/",
+                },
+            },
+        )
+        (task10 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "Todo store + Android projection API doubles: WhatsApp "
+                        "'Add todo' Auto-creates; list/get/complete reflect same ids; "
+                        "dedup near-identical open todos; E2E-03 Virtual User ready"
+                    ),
+                    "result": "PASS" if task10_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-03",
+                    "e2e03_result": e2e03_demo.result,
+                    "unit_checks": [c.get("id") for c in todo_unit],
+                    "integration_checks": [c.get("id") for c in todo_integration],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-10/report.json",
+                        "artifacts/test/task-10/verification.json",
+                        "artifacts/test/task-10/todos.json",
+                        "artifacts/test/task-10/android-projection.json",
+                        "artifacts/test/task-10/outbound-messages.json",
+                        "artifacts/test/e2e-03/verification.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return 0 if overall == "PASS" else 1
 
 
@@ -551,7 +2433,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--layer",
-        choices=("all", "unit", "contract", "integration"),
+        choices=("all", "unit", "contract", "integration", "e2e"),
         default="all",
     )
     args = parser.parse_args(argv)
@@ -567,6 +2449,11 @@ def main(argv: list[str] | None = None) -> int:
             layers.append(run_contract(out_dir, broken_allow_all=args.break_invariant))
         if args.layer in ("all", "integration"):
             layers.append(run_integration(out_dir))
+        if args.layer in ("all", "e2e"):
+            # Fail-closed must not stomp happy-path E2E-01 verification stamps.
+            layers.append(
+                run_e2e(out_dir, write_flow_artifacts=not args.break_invariant)
+            )
         return aggregate(layers, out_dir, broken=args.break_invariant)
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()

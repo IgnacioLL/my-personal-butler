@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test:ci — merge gate entrypoint (unit + contract/INV-* + integration stubs).
+# test:ci — merge gate entrypoint (unit + contract/INV-* + integration + gate e2e).
 # Fail-closed: invariant failures exit non-zero.
 #
 # Happy path:     ./scripts/test-ci.sh
@@ -34,7 +34,7 @@ echo ""
 
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
-echo "==> layers: unit → contract/INV-* → integration"
+echo "==> layers: unit → contract/INV-* → integration → e2e (E2E-01 gate)"
 # Capture exit under set -e so we still print FAIL + artifact paths.
 set +e
 python3 "$ROOT/scripts/run_test_ci.py" "${EXTRA[@]}"
@@ -48,5 +48,6 @@ else
   echo "==> test:ci FAIL (fail-closed)"
 fi
 echo "    artifacts: artifacts/test/ci/report.json"
+echo "    e2e-01:    artifacts/test/e2e-01/report.json"
 echo "    Agent B re-run: see artifacts/test/ci/report.json → agent_b_rerun"
 exit "$status"

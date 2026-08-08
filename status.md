@@ -34,7 +34,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | Artifacts under `artifacts/test/` | done | `artifacts/test/ci/{report.json,report.md,verification.json}` |
 | Fake clock utility | done | `src/harness/clock.py` — `now()` / `advance(duration)` |
 | INV-* runner skeleton | done | `src/harness/inv_runner.py` + `src/invariants/` |
-| Virtual User harness | pending | Outbound catcher + ingress sim stubs only (full VU later) |
+| Virtual User harness | done | `src/harness/virtual_user.py` — inject audio/text, create reminders, assert state (E2E-01 gate) |
 | Phase exits require matching T* unlock | pending | |
 
 ---
@@ -90,77 +90,77 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** done
 - **Scope:** Seed memory profile template; hot profile + episodic write/read per `intelligence/memory.md`. Integration tests; no secrets in memory files.
 - **Acceptance:** Memory R/W integration green; fixture seed profile exists.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: fixture `seed-profile.json` seeds hot profile (Alex, grandma household, peanuts allergy); explicit `remember` + episodic append survive `MemoryStore.open` reboot; `INV-MEM-001` + integration reject `token:`/`sk-`/AWS/GitHub patterns with no disk leak. `INV-MEM-*` intact; no gaps requiring code fix. Ready for TASK-07 (reminders can use `hot_context_lines` / `planning_constraints`).
+- **Artifacts:** `src/intelligence/memory/{store,secrets}.py`, `src/invariants/inv_mem_001.py`, `fixtures/memory/seed-profile.json`, `scripts/run_test_ci.py`, `artifacts/test/{ci,task-04}/` (runtime; gitignored)
 
 ### TASK-05 — Hosting / Gateway config skeleton + reboot durability hooks
 - **Phase:** 0
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** done
 - **Scope:** Documented/config scaffolding for always-on Gateway per `operations/hosting.md`; backup paths; restart preserves pending approvals (prep for E2E-10). No live VPS required — harness-friendly config.
 - **Acceptance:** Config templates + tests that approval store survives harness restart.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: pending buy approval survives `ActionGateway` reopen + `ApprovalStore.open()` + `GatewayHarness.restart()`; Accept executes once after restart (`buy_count=1`, second execute blocked, status=executed). Config templates (`gateway.harness.json`, `backup.example.json`, hosting section) load; `INV-APPR/KILL/AUDIT/INGRESS/MEM-*` intact. No code fixes required. Ready for TASK-06 / E2E-10 prep.
+- **Artifacts:** `src/policy/approvals.py`, `src/policy/action_gateway.py`, `src/harness/{gateway_profile,gateway_harness}.py`, `config/{gateway.harness.json,backup.example.json,gateway.example.yaml,README.md}`, `scripts/backup-restore-placeholder.sh`, `scripts/run_test_ci.py`, `artifacts/test/task-05/` (runtime; gitignored)
 
 ### TASK-06 — Transcription pipeline (WhatsApp audio → turn)
 - **Phase:** 1 / T1
 - **Depends on:** TASK-03, TASK-01
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** done
 - **Scope:** STT stub + audio fixture pack; every voice note → transcript or clarification (`INV-INGRESS-003`); optional TTS policy hooks. See `intelligence/transcription.md`.
 - **Acceptance:** Fixture map audio→transcript; E2E-01 dependency ready.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: `fx-reminder` → `[Audio] Remind me Sunday at 18:00 to call grandma.`; empty/garbage/oversize/unknown/low-conf buy → clarification; no hard tools on unclear audio (`INV-INGRESS-003`). Review fix: enforce manifest `max_duration_sec` (duration-only oversize) — was declared but unused. E2E-01 STT dependency ready. Ready for TASK-07.
+- **Artifacts:** `src/intelligence/transcription/{stt,tts,pipeline}.py`, `fixtures/audio/{manifest.json,*.ogg}`, `src/harness/whatsapp_transport.py`, `src/invariants/inv_ingress_003.py`, `scripts/run_test_ci.py`, `artifacts/test/task-06/`
 
 ### TASK-07 — Reminders + habits (fake clock)
 - **Phase:** 1 / T1
 - **Depends on:** TASK-01, TASK-04, TASK-06
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** done
 - **Scope:** One-shot + recurring reminders; habit schedules; cron via fake clock. Per `capabilities/reminders-and-habits.md`. Auto approval tier.
 - **Acceptance:** Unit + integration with clock.advance; outbound confirm captured.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: parse “Remind me Sunday at 18:00 to call grandma” → Sunday 18:00 / body call grandma; `FakeClock.advance` fires outbound `Reminder: call grandma`; `reminder_create`/`habit_create` Auto with zero hard approval items. Review fix: fail-closed must not stomp `artifacts/test/task-07/` verification. INV-* intact. E2E-01 create/fire ready.
+- **Artifacts:** `src/capabilities/reminders/{parse,store,scheduler,service}.py`, `src/policy/action_gateway.py`, `scripts/run_test_ci.py`, `artifacts/test/task-07/`
 
 ### TASK-08 — E2E-01 Voice reminder journey
 - **Phase:** 1 / T1
 - **Depends on:** TASK-06, TASK-07, Virtual User (TASK-01)
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** done
 - **Scope:** Full E2E-01 from `testing/e2e-flows.md` with stubs; write `artifacts/test/e2e-01/` + verification.json.
 - **Acceptance:** T1 exit — voice-note reminder green without human phone.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent B review) — Re-ran `make e2e-01` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0. Spot-checks: due=2026-01-11T18:00:00+01:00 (Mon 2026-01-05 → next Sunday 18:00 Europe/Madrid); hard=0 / pending=0 / approval_id=None / tier=auto. Fail-closed does not stomp e2e-01 verification (still PASS). INV-* intact. No code gaps. **T1 exit met** — voice-note reminder green without a human phone.
+- **Artifacts:** `src/harness/virtual_user.py`, `scripts/run_e2e_01.py`, `scripts/run_test_ci.py` (e2e layer), `Makefile` (`e2e-01`), `artifacts/test/e2e-01/{report.json,verification.json,outbound-messages.json,reminders.json,trace.jsonl}`
 
 ### TASK-09 — Models router (Luna default / Terra-Sol escalate) stubs
 - **Phase:** 1
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** done
 - **Scope:** Deterministic router tests w/ stubs per `intelligence/models-and-credits.md`. No live Luna in CI gates.
 - **Acceptance:** Router unit/contract green.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-01` exit 0. Spot-checks: Luna for reminder/todo/general hello (`luna_intent` / `default_luna`, no escalation); Sol for deep-plan phrase (`deep_plan_request`), multi-day calendar+diet+travel, policy change, multi-file self-mod; Sol wins over Terra when both signals present. Fixture table 15/15 via `RoutingSignals.from_dict`. `INV-MODEL-001/002` green; STT stub independent from chat model. Fail-closed does not stomp task-09 verification (still PASS). No code fixes required. Ready for TASK-10.
+- **Artifacts:** `src/intelligence/models/{roles,router,stubs,fixtures}.py`, `src/invariants/inv_model_00{1,2}.py`, `fixtures/models/routing-intents.json`, `scripts/run_test_ci.py`, `artifacts/test/task-09/` (runtime; gitignored)
 
 ### TASK-10 — Todos + Android projection API
 - **Phase:** 2 / T2
 - **Depends on:** TASK-02, TASK-04
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** review
 - **Scope:** Todo store + Android projection doubles; WhatsApp “add todo” → Android API equality. Per `capabilities/todos.md`, `channels/android-companion.md`.
 - **Acceptance:** E2E-03 ready; state equality tests.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Agent A implement — TodoStore (id/title/status + dedup); WhatsApp “Add todo: …” Auto path via TodoService + VirtualUser; AndroidProjectionApi list/get/complete reflects same ids; completing via Android updates agent store; unit + integration checks green; E2E-03 Virtual User journey wired (prep for TASK-12 gate). Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-01` exit 0. INV-* intact.
+- **Artifacts:** `src/capabilities/todos/{store,parse,service}.py`, `src/channels/android/projection.py`, `src/policy/{action_gateway,approvals}.py`, `src/harness/virtual_user.py`, `scripts/run_test_ci.py`, `artifacts/test/task-10/` (runtime; gitignored), `artifacts/test/e2e-03/` (runtime; gitignored)
 
 ### TASK-11 — Android approval inbox Virtual User wiring
 - **Phase:** 2 / T2
@@ -357,8 +357,28 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:00 | TASK-03 | Agent A | cursor-grok-4.5-high | implement | Ingress hardened — mock transport + INV-INGRESS-001/002 adversarial + 003 scaffold; status → review |
 | 2026-08-08 22:00 | TASK-03 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; @newsletter non-DM fix; status → done |
 | 2026-08-08 22:02 | TASK-04 | subagent-A | composer-2.5 | implement | Personal memory profile template + R/W integration |
+| 2026-08-08 22:05 | TASK-04 | Agent A | composer-2.5 | implement | Memory store + INV-MEM-001 + integration; status → review |
+| 2026-08-08 22:06 | TASK-04 | Agent B | composer-2.5 | review | PASS — re-ran test-ci + fail-closed; secrets/fixture/persistence spot-checks; status → done |
+| 2026-08-08 22:08 | TASK-05 | subagent-A | composer-2.5 | implement | Hosting/Gateway config + approval store reboot durability |
+| 2026-08-08 22:06 | TASK-05 | Agent A | composer-2.5 | implement | Durable approvals + E2E-10 prep tests; status → review |
+| 2026-08-08 22:06 | TASK-05 | Agent B | composer-2.5 | review | PASS — re-ran test-ci + fail-closed; restart/accept-once spot-checks; status → done |
+| 2026-08-08 22:10 | TASK-06 | subagent-A | cursor-grok-4.5-high | implement | STT stub + audio fixtures + INV-INGRESS-003 transcription path |
+| 2026-08-08 22:12 | TASK-06 | Agent A | cursor-grok-4.5-high | implement | STT+TTS+pipeline wired; INV-INGRESS-003 full; status → review |
+| 2026-08-08 22:15 | TASK-06 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; duration bound fix; status → done |
+| 2026-08-08 22:16 | TASK-07 | subagent-A | cursor-grok-4.5-high | implement | Reminders + habits with fake clock |
+| 2026-08-08 22:17 | TASK-07 | Agent A | cursor-grok-4.5-high | implement | Reminders/habits complete — FakeClock fire + confirm; status → review |
+| 2026-08-08 22:20 | TASK-07 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; parse/fire/auto spot-checks; task-07 artifact stomp fix; status → done |
+| 2026-08-08 22:21 | TASK-08 | subagent-A | cursor-grok-4.5-high | implement | E2E-01 Virtual User voice reminder journey |
+| 2026-08-08 22:25 | TASK-08 | Agent A | cursor-grok-4.5-high | implement | E2E-01 gate green — VirtualUser + test:ci e2e layer; status → review |
+| 2026-08-08 22:28 | TASK-08 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-01/test-ci/fail-closed exit 0; due+no-hard spot-checks; T1 exit; status → done |
+| 2026-08-08 22:29 | TASK-09 | subagent-A | composer-2.5 | implement | Luna/Terra-Sol models router stubs |
+| 2026-08-08 22:32 | TASK-09 | Agent A | composer-2.5 | implement | Router stubs + INV-MODEL-001/002 + task-09 artifacts; status → review |
+| 2026-08-08 22:35 | TASK-09 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed/e2e-01 exit 0; Luna/Sol spot-checks; status → done |
+| 2026-08-08 22:36 | TASK-10 | subagent-A | composer-2.5 | implement | Todos store + Android projection API doubles |
+| 2026-08-08 22:40 | TASK-10 | Agent A | composer-2.5 | implement | Todo store + Android API doubles + E2E-03 prep; status → review |
 
 ---
+
 
 ## Rules for sub-agents (mandatory)
 
@@ -377,5 +397,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-04 in_progress (memory).  
-**Next:** TASK-04 Agent B, then TASK-05 / TASK-06 / TASK-09.
+**Now:** TASK-10 review (Agent B).  
+**Next:** TASK-10 Agent B, then TASK-11.
