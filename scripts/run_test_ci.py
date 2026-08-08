@@ -39,6 +39,10 @@ from policy.approvals import (  # noqa: E402
 from policy.ingress import evaluate_ingress, normalize_sender  # noqa: E402
 from intelligence.memory.secrets import MemorySecretsError, redact_secrets  # noqa: E402
 from intelligence.memory.store import MemoryStore  # noqa: E402
+from intelligence.models.fixtures import load_routing_fixture  # noqa: E402
+from intelligence.models.roles import ModelRole  # noqa: E402
+from intelligence.models.router import RoutingSignals, route  # noqa: E402
+from intelligence.models.stubs import ModelStubRegistry  # noqa: E402
 from intelligence.transcription.pipeline import TranscriptionPipeline  # noqa: E402
 from intelligence.transcription.stt import SttOutcome, SttStub, load_manifest  # noqa: E402
 from intelligence.transcription.tts import TtsMode, TtsPolicySpy  # noqa: E402
@@ -231,6 +235,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     )
 
     checks.extend(_run_transcription_unit_checks(ROOT))
+    checks.extend(_run_models_unit_checks(ROOT))
     checks.extend(_run_reminder_unit_checks())
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
@@ -396,6 +401,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_memory_integration_checks(ROOT))
     checks.extend(_run_task05_hosting_checks(ROOT))
     checks.extend(_run_transcription_integration_checks(ROOT))
+    checks.extend(_run_models_integration_checks(ROOT))
     checks.extend(_run_reminder_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
@@ -511,6 +517,178 @@ def _run_transcription_unit_checks(root: Path) -> list[dict[str, Any]]:
             "detail": (
                 f"inbound={inbound.snapshot()} never={never.speak_count} "
                 f"always={always.speak_count}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_models_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Models router: fixture table, Luna default, Terra/Sol escalation, stub registry."""
+    checks: list[dict[str, Any]] = []
+    fixture_path = root / "fixtures" / "models" / "routing-intents.json"
+    fixture = load_routing_fixture(fixture_path)
+    cases = fixture.get("cases", [])
+    fixture_ok = fixture_path.is_file() and len(cases) >= 10
+    checks.append(
+        {
+            "id": "unit.models.fixture_pack",
+            "result": "PASS" if fixture_ok else "FAIL",
+            "detail": f"path={fixture_path} cases={len(cases)}",
+        }
+    )
+
+    table_failures: list[str] = []
+    for case in cases:
+        case_id = case.get("id", "?")
+        expected = case.get("expected_model")
+        signals = RoutingSignals.from_dict(case.get("signals") or {})
+        decision = route(signals)
+        if decision.model.value != expected:
+            table_failures.append(
+                f"{case_id}: expected {expected} got {decision.model.value}"
+            )
+    table_ok = not table_failures
+    checks.append(
+        {
+            "id": "unit.models.fixture_table",
+            "result": "PASS" if table_ok else "FAIL",
+            "detail": (
+                f"all {len(cases)} cases match"
+                if table_ok
+                else "; ".join(table_failures[:5])
+            ),
+        }
+    )
+
+    luna_dec = route(RoutingSignals(intent="reminder", utterance="Remind me at 5"))
+    luna_ok = luna_dec.model is ModelRole.LUNA and not luna_dec.escalated
+    checks.append(
+        {
+            "id": "unit.models.default_luna",
+            "result": "PASS" if luna_ok else "FAIL",
+            "detail": f"model={luna_dec.model.value} escalated={luna_dec.escalated}",
+        }
+    )
+
+    terra_dec = route(
+        RoutingSignals(
+            intent="booking",
+            utterance="retry booking",
+            booking_retry=True,
+        )
+    )
+    sol_dec = route(
+        RoutingSignals(
+            intent="self_mod",
+            utterance="patch three files",
+            self_mod_files=3,
+        )
+    )
+    escalate_ok = (
+        terra_dec.model is ModelRole.TERRA
+        and terra_dec.escalated
+        and sol_dec.model is ModelRole.SOL
+        and sol_dec.escalated
+    )
+    checks.append(
+        {
+            "id": "unit.models.terra_sol_escalation",
+            "result": "PASS" if escalate_ok else "FAIL",
+            "detail": (
+                f"terra={terra_dec.model.value} sol={sol_dec.model.value} "
+                f"terra_reasons={terra_dec.reasons} sol_reasons={sol_dec.reasons}"
+            ),
+        }
+    )
+
+    registry = ModelStubRegistry()
+    luna_stub = registry.complete_as(ModelRole.LUNA, "hello reminder")
+    sol_stub = registry.complete_as(ModelRole.SOL, "deep plan week")
+    stub_ok = (
+        luna_stub.model is ModelRole.LUNA
+        and sol_stub.model is ModelRole.SOL
+        and luna_stub.stub
+        and "[stub:luna]" in luna_stub.text
+        and registry.for_role(ModelRole.LUNA).snapshot()["call_count"] == 1
+    )
+    checks.append(
+        {
+            "id": "unit.models.stub_registry",
+            "result": "PASS" if stub_ok else "FAIL",
+            "detail": (
+                f"luna_text={luna_stub.text!r} sol_model={sol_stub.model.value} "
+                f"snapshot={registry.snapshot()}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_models_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """STT pipeline independent from chat model selection; router + stubs wired."""
+    checks: list[dict[str, Any]] = []
+
+    # Chat model stubs never touch STT; pipeline uses SttStub regardless of router.
+    pipeline = TranscriptionPipeline.from_fixtures(
+        manifest_path=root / "fixtures" / "audio" / "manifest.json"
+    )
+    registry = ModelStubRegistry()
+    chat_dec = route(
+        RoutingSignals(intent="reminder", utterance="Remind me Sunday to call grandma")
+    )
+    chat_completion = registry.complete_as(chat_dec.model, "route then respond")
+    audio_turn = pipeline.process_voice_note(audio_fixture_id="fx-reminder")
+
+    stt_indep_ok = (
+        chat_dec.model is ModelRole.LUNA
+        and chat_completion.model is ModelRole.LUNA
+        and audio_turn.is_transcript_turn
+        and isinstance(pipeline.stt, SttStub)
+        and registry.snapshot()["luna"]["call_count"] == 1
+        and pipeline.stt.snapshot().get("call_count", 0) >= 1
+    )
+    checks.append(
+        {
+            "id": "integration.models.stt_independent_from_chat",
+            "result": "PASS" if stt_indep_ok else "FAIL",
+            "detail": (
+                f"chat={chat_dec.model.value} stt_type={type(pipeline.stt).__name__} "
+                f"transcript_turn={audio_turn.is_transcript_turn} "
+                f"stt_calls={pipeline.stt.snapshot().get('call_count')}"
+            ),
+        }
+    )
+
+    # Escalated planning path uses Sol stub without changing STT config.
+    sol_signals = RoutingSignals(
+        intent="planning",
+        utterance="Give me a deep plan for travel and meals",
+        multi_day_plan=True,
+        has_calendar_constraints=True,
+        has_diet_constraints=True,
+        has_travel_constraints=True,
+    )
+    sol_dec = route(sol_signals)
+    sol_completion = registry.complete_as(sol_dec.model, "weekly plan draft")
+    pipeline2 = TranscriptionPipeline.from_fixtures(
+        manifest_path=root / "fixtures" / "audio" / "manifest.json"
+    )
+    clarify = pipeline2.process_voice_note(audio_fixture_id="fx-empty")
+    escalate_path_ok = (
+        sol_dec.model is ModelRole.SOL
+        and sol_completion.model is ModelRole.SOL
+        and clarify.is_clarification
+        and isinstance(pipeline2.stt, SttStub)
+        and pipeline2.stt is not pipeline.stt
+    )
+    checks.append(
+        {
+            "id": "integration.models.sol_planning_with_stt_stub",
+            "result": "PASS" if escalate_path_ok else "FAIL",
+            "detail": (
+                f"sol_dec={sol_dec.model.value} sol_stub={sol_completion.model.value} "
+                f"clarify={clarify.is_clarification} stt={pipeline2.stt.snapshot()}"
             ),
         }
     )
@@ -1245,6 +1423,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-05/",
                     "artifacts/test/task-06/",
                     "artifacts/test/task-07/",
+                    "artifacts/test/task-09/",
                 ],
             },
         },
@@ -1272,6 +1451,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-05/verification.json",
             "artifacts/test/task-06/verification.json",
             "artifacts/test/task-07/verification.json",
+            "artifacts/test/task-09/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -1776,6 +1956,115 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-07/verification.json",
                         "artifacts/test/task-07/outbound-messages.json",
                         "artifacts/test/task-07/reminders.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-09 models router artifacts.
+    models_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.models.")
+    ]
+    models_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.models.")
+    ]
+    model_invariants = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-MODEL-")
+    ]
+    task09_checks = models_unit + models_integration + model_invariants
+    task09_pass = (
+        all(c.get("result") == "PASS" for c in task09_checks) if task09_checks else False
+    )
+    if not broken:
+        task09 = ROOT / "artifacts" / "test" / "task-09"
+        task09.mkdir(parents=True, exist_ok=True)
+        # Sample routing decisions for artifact convention (no live Luna).
+        routing_sample = []
+        fixture_path = ROOT / "fixtures" / "models" / "routing-intents.json"
+        fixture = load_routing_fixture(fixture_path)
+        for case in fixture.get("cases", []):
+            signals = RoutingSignals.from_dict(case.get("signals") or {})
+            decision = route(signals)
+            routing_sample.append(
+                {
+                    "id": case.get("id"),
+                    "expected_model": case.get("expected_model"),
+                    "decision": decision.to_dict(),
+                }
+            )
+        (task09 / "routing-decisions.json").write_text(
+            json.dumps({"cases": routing_sample}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        registry = ModelStubRegistry()
+        for role in ModelRole:
+            registry.complete_as(role, f"sample prompt for {role.value}")
+        (task09 / "stub-snapshot.json").write_text(
+            json.dumps(registry.snapshot(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            task09,
+            layer="task-09",
+            result="PASS" if task09_pass else "FAIL",
+            checks=task09_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "fixture": "fixtures/models/routing-intents.json",
+                "model_invariants": [c.get("id") for c in model_invariants],
+                "no_live_luna_in_ci": True,
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-09/",
+                },
+            },
+        )
+        (task09 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "Luna default routing; Terra/Sol escalation for hard planning "
+                        "and self-mod; STT stub independent from chat model; "
+                        "no live Luna in CI"
+                    ),
+                    "result": "PASS" if task09_pass else "FAIL",
+                    "ci_overall": overall,
+                    "fixture": "fixtures/models/routing-intents.json",
+                    "unit_checks": [c.get("id") for c in models_unit],
+                    "integration_checks": [c.get("id") for c in models_integration],
+                    "invariants": [c.get("id") for c in model_invariants],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-09/report.json",
+                        "artifacts/test/task-09/verification.json",
+                        "artifacts/test/task-09/routing-decisions.json",
+                        "artifacts/test/task-09/stub-snapshot.json",
+                        "fixtures/models/routing-intents.json",
                     ],
                 },
                 indent=2,
