@@ -156,10 +156,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-02, TASK-04
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Todo store + Android projection doubles; WhatsApp “add todo” → Android API equality. Per `capabilities/todos.md`, `channels/android-companion.md`.
 - **Acceptance:** E2E-03 ready; state equality tests.
-- **Result:** Agent A implement — TodoStore (id/title/status + dedup); WhatsApp “Add todo: …” Auto path via TodoService + VirtualUser; AndroidProjectionApi list/get/complete reflects same ids; completing via Android updates agent store; unit + integration checks green; E2E-03 Virtual User journey wired (prep for TASK-12 gate). Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-01` exit 0. INV-* intact.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-01` exit 0. Spot-checks: WhatsApp “Add todo: buy oat milk” Auto → Android `list_todos`/`get_todo` same id/title/open; `complete_todo` → store `done`; re-add “Buy oat milk” dedups (same id, `todo_dedup` outbound, one open row). E2E-03 Virtual User journey PASS (`gate: false`, prep for TASK-12). Review fix: remove duplicate `run_e2e_03` in `virtual_user.py`. Fail-closed does not stomp task-10/e2e-03 verification. INV-* intact. Ready for TASK-11.
 - **Artifacts:** `src/capabilities/todos/{store,parse,service}.py`, `src/channels/android/projection.py`, `src/policy/{action_gateway,approvals}.py`, `src/harness/virtual_user.py`, `scripts/run_test_ci.py`, `artifacts/test/task-10/` (runtime; gitignored), `artifacts/test/e2e-03/` (runtime; gitignored)
 
 ### TASK-11 — Android approval inbox Virtual User wiring
@@ -376,6 +376,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:35 | TASK-09 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed/e2e-01 exit 0; Luna/Sol spot-checks; status → done |
 | 2026-08-08 22:36 | TASK-10 | subagent-A | composer-2.5 | implement | Todos store + Android projection API doubles |
 | 2026-08-08 22:40 | TASK-10 | Agent A | composer-2.5 | implement | Todo store + Android API doubles + E2E-03 prep; status → review |
+| 2026-08-08 22:42 | TASK-10 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed/e2e-01 exit 0; todo/Android/dedup spot-checks; dup run_e2e_03 fix; status → done |
 
 ---
 
@@ -397,5 +398,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-10 review (Agent B).  
-**Next:** TASK-10 Agent B, then TASK-11.
+**Now:** TASK-11 (Android approval inbox Virtual User wiring).  
+**Next:** TASK-11 Agent A, then TASK-12 (E2E-03 gate).
