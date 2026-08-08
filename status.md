@@ -310,7 +310,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-23
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** E2E-08 accept + deny; gate deny path.
 - **Acceptance:** T7 exit.
 - **Result:** _(agent)_
@@ -415,6 +415,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 01:55 | TASK-23 | subagent-A | cursor-grok-4.5-high | implement | Self-mod allowlist + hard approve apply + INV-SELF |
 | 2026-08-09 02:15 | TASK-23 | Agent A | cursor-grok-4.5-high | implement | Self-mod + INV-SELF-001..004 + E2E-08 ready; status → review |
 | 2026-08-08 23:45 | TASK-23 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/sample e2e exit 0; allowlist/Accept/freeze/secrets/rollback_ref/INV-SELF spot-checks; E2E-08 ready; status → done |
+| 2026-08-09 02:10 | TASK-24 | subagent-A | cursor-grok-4.5-high | implement | E2E-08 self-mod accept+deny gate |
 
 ---
 
@@ -437,5 +438,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-23 done (self-mod + INV-SELF-* + E2E-08 ready).  
-**Next:** TASK-24 E2E-08 Self-mod patch (+ deny) / T7 exit.
+**Now:** TASK-24 in_progress (E2E-08).  
+**Next:** TASK-24 Agent B, then TASK-25 polish + TASK-26 CI.
