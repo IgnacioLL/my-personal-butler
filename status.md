@@ -68,11 +68,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00, TASK-01
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Implement approval item schema + status machine (`pending|accepted|denied|expired|executed|failed|cancelled`), tiers from `trust-and-safety/approval-matrix.md`, kill switches (`pause agent`, `freeze spending`, `freeze self-mod`, `cancel pending`). Contract tests for `INV-APPR-001..004`, `INV-KILL-001..002`, `INV-AUDIT-001` (as applicable at this stage).
 - **Acceptance:** Invariants green in harness; no hard action path without accept.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Approval status machine + Auto/Soft/Hard/Forbidden matrix in `src/policy/approvals.py`; `ActionGateway` gates buy/book/self_mod_apply/policy_change + soft calendar writes until `status==accepted`; kill switches pause/freeze spending/freeze self-mod/cancel pending; stub calendar/commerce/selfmod/cron adapters. Contract INVs green: `INV-APPR-001..004`, `INV-KILL-001..002`, `INV-AUDIT-001`. `make test-ci` PASS; `make test-ci-fail-closed` still proves broken INV rejected. Ready for Agent B review.
+- **Artifacts:** `src/policy/{approvals,kill_switches,audit,action_gateway}.py`, `src/harness/adapters.py`, `src/invariants/inv_{appr_00{1,2,3,4},kill_00{1,2},audit_001}.py`, `fixtures/approvals/sample-items.json`, `artifacts/test/{ci,task-02}/` (runtime; gitignored)
 
 ### TASK-03 — WhatsApp ingress allowlist + routing (INV-INGRESS-*)
 - **Phase:** 0 / T0
@@ -351,6 +351,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 21:55 | TASK-01 | Agent A | cursor-grok-4.5-high | implement | T0 complete — test:ci + fail-closed proof; status → review |
 | 2026-08-08 21:50 | TASK-01 | Agent B | cursor-grok-4.5-high | review | PASS — fail-closed re-verified; test-ci.sh set -e status fix; status → done |
 | 2026-08-08 21:56 | TASK-02 | subagent-A | cursor-grok-4.5-high | implement | Approval matrix + kill switches + INV-APPR/KILL/AUDIT |
+| 2026-08-08 21:58 | TASK-02 | Agent A | cursor-grok-4.5-high | implement | Trust core complete — INV-APPR/KILL/AUDIT green; status → review |
 
 ---
 
@@ -371,5 +372,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-01 done (T0 harness scaffolding + fail-closed verified).  
-**Next:** TASK-02 (trust/approvals), TASK-03 (WhatsApp ingress INV-INGRESS-*), TASK-04 (memory) as deps allow.
+**Now:** TASK-02 review (Agent B).  
+**Next:** TASK-03 / TASK-04 / TASK-05 after TASK-02 done.

@@ -24,6 +24,12 @@ from harness.clock import FakeClock  # noqa: E402
 from harness.ingress_sim import IngressSimulator  # noqa: E402
 from harness.inv_runner import run_all  # noqa: E402
 from harness.outbound import OutboundMessageCatcher  # noqa: E402
+from policy.action_gateway import ActionGateway  # noqa: E402
+from policy.approvals import (  # noqa: E402
+    ApprovalStatus,
+    ApprovalTier,
+    tier_for,
+)
 
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
@@ -49,6 +55,77 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
             "id": "unit.outbound_catcher.capture",
             "result": "PASS" if ok2 else "FAIL",
             "detail": "catcher records one outbound message",
+        }
+    )
+
+    # Approval matrix tiers (table-driven smoke)
+    matrix_ok = (
+        tier_for("todo_add") == ApprovalTier.AUTO
+        and tier_for("calendar_create") == ApprovalTier.SOFT_CONFIRM
+        and tier_for("buy") == ApprovalTier.HARD_APPROVE
+        and tier_for("transfer_money") == ApprovalTier.FORBIDDEN
+        and tier_for("self_mod_apply") == ApprovalTier.HARD_APPROVE
+        and tier_for("policy_change") == ApprovalTier.HARD_APPROVE
+    )
+    checks.append(
+        {
+            "id": "unit.approval_matrix.tiers",
+            "result": "PASS" if matrix_ok else "FAIL",
+            "detail": "Auto/Soft/Hard/Forbidden mapping for sample actions",
+        }
+    )
+
+    # Status machine: pending → accepted → executed; Accept once idempotent side-effect
+    gw = ActionGateway(clock=FakeClock())
+    prop = gw.propose("buy", "unit buy", {"sku": "u1", "price": 1.0})
+    status_ok = False
+    detail = "propose failed"
+    if prop.approval_id:
+        gw.accept(prop.approval_id)
+        first = gw.execute(prop.approval_id)
+        # Second accept on executed should fail closed (terminal)
+        second_accept_blocked = False
+        try:
+            gw.accept(prop.approval_id)
+        except Exception:  # noqa: BLE001
+            second_accept_blocked = True
+        item = gw.approvals.get(prop.approval_id)
+        status_ok = (
+            first.ok
+            and gw.commerce.buy_count == 1
+            and item is not None
+            and item.status == ApprovalStatus.EXECUTED
+            and second_accept_blocked
+        )
+        detail = (
+            f"status={item.status.value if item else None} "
+            f"buy_count={gw.commerce.buy_count} "
+            f"second_accept_blocked={second_accept_blocked}"
+        )
+    checks.append(
+        {
+            "id": "unit.approval_status_machine",
+            "result": "PASS" if status_ok else "FAIL",
+            "detail": detail,
+        }
+    )
+
+    # Kill switches snapshot
+    gw2 = ActionGateway(clock=FakeClock())
+    gw2.pause_agent()
+    gw2.freeze_spending()
+    gw2.freeze_self_mod()
+    snap = gw2.kill.snapshot()
+    kill_ok = (
+        snap.get("pause_agent")
+        and snap.get("freeze_spending")
+        and snap.get("freeze_self_mod")
+    )
+    checks.append(
+        {
+            "id": "unit.kill_switches.flags",
+            "result": "PASS" if kill_ok else "FAIL",
+            "detail": f"snapshot={snap}",
         }
     )
 
@@ -114,6 +191,35 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
         }
     )
 
+    # Trust core: hard buy without accept cannot execute; accept then execute + audit.
+    gw = ActionGateway(clock=FakeClock())
+    prop = gw.propose("buy", "integration buy", {"sku": "int-1", "price": 9.99})
+    trust_ok = False
+    trust_detail = "propose failed"
+    if prop.approval_id:
+        blocked = gw.execute(prop.approval_id)
+        gw.accept(prop.approval_id)
+        done = gw.execute(prop.approval_id)
+        audits = gw.audit.for_approval(prop.approval_id)
+        trust_ok = (
+            (not blocked.ok)
+            and done.ok
+            and gw.commerce.buy_count == 1
+            and len(audits) == 1
+            and audits[0].approval_id == prop.approval_id
+        )
+        trust_detail = (
+            f"blocked={blocked.reason} executed={done.ok} "
+            f"buy_count={gw.commerce.buy_count} audit={len(audits)}"
+        )
+    checks.append(
+        {
+            "id": "integration.trust_core.hard_buy_gate",
+            "result": "PASS" if trust_ok else "FAIL",
+            "detail": trust_detail,
+        }
+    )
+
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
     catcher.write_json(layer_dir / "outbound-messages.json")
@@ -155,7 +261,10 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
 
     # Compact stamp for autonomous verification loops.
     stamp = {
-        "claim": "T0 harness scaffolding: test:ci fail-closed on broken INV",
+        "claim": (
+            "Trust core: hard actions require accepted approval; "
+            "kill switches + INV-APPR/KILL/AUDIT green; fail-closed on broken INV"
+        ),
         "result": overall,
         "broken_allow_all": broken,
         "commands": [
@@ -163,7 +272,10 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             if broken
             else "./scripts/test-ci.sh"
         ],
-        "artifacts": ["artifacts/test/ci/report.json"],
+        "artifacts": [
+            "artifacts/test/ci/report.json",
+            "artifacts/test/task-02/verification.json",
+        ],
         "invariants": [
             c.get("id")
             for L in layers
@@ -173,6 +285,64 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    # TASK-02 dedicated artifact mirror (same CI results + trust focus).
+    task02 = ROOT / "artifacts" / "test" / "task-02"
+    task02.mkdir(parents=True, exist_ok=True)
+    trust_ids = [
+        c.get("id")
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith(("INV-APPR-", "INV-KILL-", "INV-AUDIT-"))
+    ]
+    trust_checks = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith(("INV-APPR-", "INV-KILL-", "INV-AUDIT-"))
+    ]
+    trust_pass = all(c.get("result") == "PASS" for c in trust_checks) if trust_checks else False
+    write_report(
+        task02,
+        layer="task-02",
+        result="PASS" if (overall == "PASS" and trust_pass) else ("FAIL" if not broken else overall),
+        checks=trust_checks or flat_checks,
+        extra={
+            "broken_allow_all": broken,
+            "trust_invariant_ids": trust_ids,
+            "ci_overall": overall,
+            "agent_b_rerun": {
+                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                "fail_closed_proof": [
+                    "./scripts/test-ci.sh --break-invariant",
+                    "make test-ci-fail-closed",
+                ],
+            },
+        },
+    )
+    (task02 / "verification.json").write_text(
+        json.dumps(
+            {
+                "claim": "No hard action path without accept; INV-APPR/KILL/AUDIT proven",
+                "result": "PASS"
+                if (overall == "PASS" and trust_pass)
+                else ("FAIL" if not broken else overall),
+                "ci_overall": overall,
+                "trust_invariants": trust_ids,
+                "commands": ["./scripts/test-ci.sh", "make test-ci"],
+                "artifacts": [
+                    "artifacts/test/task-02/report.json",
+                    "artifacts/test/ci/report.json",
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return 0 if overall == "PASS" else 1

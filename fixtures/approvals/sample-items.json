@@ -1,0 +1,45 @@
+{
+  "description": "Sample approval payloads for buy / book / self-mod / calendar soft-confirm",
+  "items": [
+    {
+      "action_type": "buy",
+      "tier": "hard_approve",
+      "summary": "Buy oat milk from stub shop",
+      "payload": { "sku": "oat-milk", "price": 4.5, "vendor": "stub-shop" },
+      "estimated_cost": 4.5,
+      "status": "pending"
+    },
+    {
+      "action_type": "book",
+      "tier": "hard_approve",
+      "summary": "Book haircut at Booksy stub",
+      "payload": { "provider": "booksy", "slot": "2026-01-15T11:00:00Z" },
+      "status": "pending"
+    },
+    {
+      "action_type": "self_mod_apply",
+      "tier": "hard_approve",
+      "summary": "Apply reminder policy patch",
+      "payload": { "files": ["src/skills/reminders.py"], "diff": "+quiet_hours" },
+      "diff_summary": "Add quiet hours guard",
+      "files_touched": ["src/skills/reminders.py"],
+      "rollback_ref": "branch/selfmod-quiet-hours",
+      "status": "pending"
+    },
+    {
+      "action_type": "policy_change",
+      "tier": "hard_approve",
+      "subtype": "policy-change",
+      "summary": "Raise spend cap",
+      "payload": { "cap": 100 },
+      "status": "pending"
+    },
+    {
+      "action_type": "calendar_create",
+      "tier": "soft_confirm",
+      "summary": "Create lunch event",
+      "payload": { "title": "Lunch", "start": "2026-01-05T12:00:00Z" },
+      "status": "pending"
+    }
+  ]
+}
