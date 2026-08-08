@@ -123,7 +123,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-01, TASK-04, TASK-06
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** One-shot + recurring reminders; habit schedules; cron via fake clock. Per `capabilities/reminders-and-habits.md`. Auto approval tier.
 - **Acceptance:** Unit + integration with clock.advance; outbound confirm captured.
 - **Result:** _(agent)_
