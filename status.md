@@ -266,7 +266,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-19
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** E2E-06 accept/deny; E2E-09 ignored approval expiry.
 - **Acceptance:** T5 exit.
 - **Result:** _(agent)_
@@ -403,6 +403,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:40 | TASK-19 | subagent-A | cursor-grok-4.5-high | implement | Bookings stub portal + hard approve + INV-BOOK |
 | 2026-08-09 00:55 | TASK-19 | Agent A | cursor-grok-4.5-high | implement | Stub portal + INV-BOOK-001/002 + writeback; status → review |
 | 2026-08-09 01:10 | TASK-19 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/prior e2e exit 0; deny writeback fix; E2E-06 ready; status → done |
+| 2026-08-09 01:12 | TASK-20 | subagent-A | cursor-grok-4.5-high | implement | E2E-06 + E2E-09 booking journeys |
 
 ---
 
@@ -425,5 +426,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-19 review PASS → done.  
-**Next:** Phase 5 E2E-06/09 (TASK-20).
+**Now:** TASK-20 in_progress (E2E-06/09).  
+**Next:** TASK-20 Agent B, then Phase 6 shopping.
