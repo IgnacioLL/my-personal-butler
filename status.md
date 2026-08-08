@@ -222,7 +222,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-15
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Seed dislikes/allergies; assert absences + grocery todos.
 - **Acceptance:** T3 exit for diet path.
 - **Result:** _(agent)_
@@ -391,6 +391,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:06 | TASK-15 | subagent-A | composer-2.5 | implement | Diet planning v1 + grocery todos from memory |
 | 2026-08-08 23:12 | TASK-15 | Agent A | composer-2.5 | implement | Diet v1 complete — constraints + grocery todos + E2E-05 structure; status → review |
 | 2026-08-08 23:15 | TASK-15 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed/e2e-01/03/04 exit 0; banned-absent + grocery todo spot-checks; E2E-05 ready; status → done |
+| 2026-08-08 23:16 | TASK-16 | subagent-A | composer-2.5 | implement | E2E-05 diet → groceries journey |
 
 ---
 
@@ -413,5 +414,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-16 E2E-05 gate (TASK-15 done).  
-**Next:** TASK-16 Agent A implement.
+**Now:** TASK-16 in_progress (E2E-05).  
+**Next:** TASK-16 Agent B, then Phase 4 (TASK-17).
