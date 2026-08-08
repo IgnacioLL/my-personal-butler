@@ -134,10 +134,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-06, TASK-07, Virtual User (TASK-01)
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Full E2E-01 from `testing/e2e-flows.md` with stubs; write `artifacts/test/e2e-01/` + verification.json.
 - **Acceptance:** T1 exit — voice-note reminder green without human phone.
-- **Result:** PASS (Agent A implement) — Virtual User drives fx-reminder → STT stub transcript → Auto reminder_create. Checks green: reminder exists; due=2026-01-11T18:00 Europe/Madrid (next Sunday); outbound confirm captured; zero hard approvals. Gate e2e layer wired into `test:ci`. `make test-ci` exit 0; `make test-ci-fail-closed` exit 0 (e2e-01 stamps not stomped). INV-* intact. Ready for Agent B review / T1 exit.
+- **Result:** PASS (Agent B review) — Re-ran `make e2e-01` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0. Spot-checks: due=2026-01-11T18:00:00+01:00 (Mon 2026-01-05 → next Sunday 18:00 Europe/Madrid); hard=0 / pending=0 / approval_id=None / tier=auto. Fail-closed does not stomp e2e-01 verification (still PASS). INV-* intact. No code gaps. **T1 exit met** — voice-note reminder green without a human phone.
 - **Artifacts:** `src/harness/virtual_user.py`, `scripts/run_e2e_01.py`, `scripts/run_test_ci.py` (e2e layer), `Makefile` (`e2e-01`), `artifacts/test/e2e-01/{report.json,verification.json,outbound-messages.json,reminders.json,trace.jsonl}`
 
 ### TASK-09 — Models router (Luna default / Terra-Sol escalate) stubs
@@ -370,6 +370,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:20 | TASK-07 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; parse/fire/auto spot-checks; task-07 artifact stomp fix; status → done |
 | 2026-08-08 22:21 | TASK-08 | subagent-A | cursor-grok-4.5-high | implement | E2E-01 Virtual User voice reminder journey |
 | 2026-08-08 22:25 | TASK-08 | Agent A | cursor-grok-4.5-high | implement | E2E-01 gate green — VirtualUser + test:ci e2e layer; status → review |
+| 2026-08-08 22:28 | TASK-08 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-01/test-ci/fail-closed exit 0; due+no-hard spot-checks; T1 exit; status → done |
 
 ---
 
@@ -391,5 +392,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-08 review (E2E-01 — Agent B).  
-**Next:** TASK-08 done → Phase 2 tasks (09–12); T1 exit if B PASS.
+**Now:** TASK-08 done; **T1 exit green** (E2E-01 voice reminder without human phone).  
+**Next:** Phase 1 remainder / Phase 2 tasks (09–12) per planner.
