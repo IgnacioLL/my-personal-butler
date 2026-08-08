@@ -409,6 +409,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 01:25 | TASK-21 | subagent-A | cursor-grok-4.5-high | implement | Shopping caps/freeze/dry-run + INV-PAY |
 | 2026-08-08 23:25 | TASK-21 | Agent A | cursor-grok-4.5-high | implement | Shopping dry-run + INV-PAY-001/002 + caps/freeze; status → review |
 | 2026-08-08 23:26 | TASK-21 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/sample e2e exit 0; propose/accept/freeze/cap/INV-PAY spot-checks; E2E-07 ready; status → done |
+| 2026-08-09 01:40 | TASK-22 | subagent-A | cursor-grok-4.5-high | implement | E2E-07 shopping cap/freeze/deny gate |
 
 ---
 
@@ -431,5 +432,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-21 review complete — shopping dry-run + INV-PAY-* → **done**; **E2E-07 ready**.  
-**Next:** TASK-22 (E2E-07 gate / T6 exit).
+**Now:** TASK-22 in_progress (E2E-07).  
+**Next:** TASK-22 Agent B, then Phase 7 self-mod.

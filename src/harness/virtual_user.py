@@ -29,9 +29,9 @@ from capabilities.reminders.parse import parse_reminder
 from capabilities.reminders.scheduler import ReminderScheduler
 from capabilities.reminders.service import ReminderService
 from capabilities.reminders.store import EscalationChannel, ReminderStore
-from capabilities.shopping.parse import looks_like_shopping
+from capabilities.shopping.parse import EXPECTED_E2E07_UTTERANCE, looks_like_shopping
 from capabilities.shopping.service import ProposePurchaseResult, ShoppingService
-from capabilities.shopping.store import PurchaseStore
+from capabilities.shopping.store import PurchaseStatus, PurchaseStore
 from capabilities.todos.parse import looks_like_todo_add
 from capabilities.todos.service import TodoService
 from capabilities.todos.store import TodoStatus, TodoStore
@@ -60,6 +60,7 @@ from policy.approvals import (
     is_hard_action,
     tier_for,
 )
+from policy.spend_caps import SpendCapConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -197,6 +198,30 @@ class E2E06Result:
     book_count_after_accept: int
     book_count_after_deny: int
     calendar_create_after_accept: int
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
+class E2E07Result:
+    """Machine-check result for E2E-07 Shopping with cap / freeze (+ deny)."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    accept_approval_id: Optional[str]
+    deny_approval_id: Optional[str]
+    freeze_approval_id: Optional[str]
+    cap_approval_id: Optional[str]
+    buy_count_after_accept: int
+    buy_count_after_deny: int
+    buy_count_after_freeze: int
+    buy_count_after_cap: int
+    proposed_price: Optional[float]
+    freeze_reason: Optional[str]
+    cap_reason: Optional[str]
     artifacts_dir: str
 
     @property
@@ -2712,6 +2737,458 @@ def run_e2e_06(
                     "book_count_after_accept": book_after_accept,
                     "book_count_after_deny": book_after_deny,
                     "calendar_create_after_accept": calendar_after_accept,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    return result
+
+
+def run_e2e_07(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E07Result:
+    """E2E-07 — Shopping with cap / freeze (gate-tagged; deny path for merge gate).
+
+    Spec (agent-plan/testing/e2e-flows.md):
+      1. “Buy my usual protein powder.”
+      2. Proposal shows price; execute = 0.
+      3. Accept under cap → dry-run purchase logged.
+      4. Repeat with freeze on → execute blocked.
+      5. Repeat over cap → blocked with cap reason.
+
+    Deny path (isolated Virtual User): Propose → Deny → buy_count stays 0.
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-07")
+    checks: list[dict[str, Any]] = []
+    utterance = EXPECTED_E2E07_UTTERANCE
+
+    # --- Accept under cap ---
+    vu = VirtualUser.bootstrap(root=repo)
+    prefs = (vu.seed_profile.get("preferences") or {}) if vu.seed_profile else {}
+    usual = dict(prefs.get("usual_purchases") or {})
+    seed_ok = (
+        bool(usual.get("protein_powder"))
+        or vu.shopping.merchant.find_usual("protein_powder") is not None
+    )
+    checks.append(
+        {
+            "id": "e2e-07.seed_usual_protein",
+            "result": "PASS" if seed_ok else "FAIL",
+            "detail": (
+                f"profile_usual={usual.get('protein_powder')!r} "
+                f"catalog_usual={vu.shopping.merchant.find_usual('protein_powder')}"
+            ),
+            "gate": True,
+        }
+    )
+
+    turn = vu.inject_text(utterance)
+    proposed = vu.last_shopping_propose
+    propose_ok = (
+        turn.allowed
+        and "buy_propose" in turn.tool_calls
+        and proposed is not None
+        and proposed.ok
+        and not proposed.executed
+        and proposed.tier == ApprovalTier.HARD_APPROVE.value
+        and proposed.approval_id is not None
+        and proposed.price == 29.99
+        and vu.buy_count() == 0
+        and proposed.buy_count_at_propose == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-07.propose_shows_price_buy_zero",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} ok={getattr(proposed, 'ok', None)} "
+                f"price={getattr(proposed, 'price', None)} buy={vu.buy_count()} "
+                f"tier={getattr(proposed, 'tier', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    pending = vu.list_android_approvals()
+    pending_ok = (
+        len(pending) == 1
+        and proposed is not None
+        and proposed.approval_id is not None
+        and pending[0].id == proposed.approval_id
+        and pending[0].action_type == "buy"
+        and pending[0].status == ApprovalStatus.PENDING.value
+        and vu.buy_count() == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-07.pending_hard_approve_buy_zero",
+            "result": "PASS" if pending_ok else "FAIL",
+            "detail": (
+                f"pending={len(pending)} buy={vu.buy_count()} "
+                f"action={pending[0].action_type if pending else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    accepted = (
+        vu.accept_approval(proposed.approval_id)
+        if proposed and proposed.approval_id
+        else None
+    )
+    buy_after_accept = vu.buy_count()
+    receipts = [
+        m for m in vu.catcher.messages if m.meta.get("kind") == "shopping_receipt"
+    ]
+    task = (
+        vu.purchase_store.get(proposed.task_id)
+        if proposed and proposed.task_id
+        else None
+    )
+    audits = (
+        vu.gateway.audit.for_approval(proposed.approval_id)
+        if proposed and proposed.approval_id
+        else []
+    )
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and accepted.approval.status == ApprovalStatus.EXECUTED.value
+        and buy_after_accept == 1
+        and len(receipts) == 1
+        and task is not None
+        and task.status == PurchaseStatus.PURCHASED
+        and task.is_success
+        and isinstance(accepted.execute.result if accepted.execute else None, dict)
+        and (accepted.execute.result or {}).get("dry_run") is True
+        and any(a.success and a.approval_id == proposed.approval_id for a in audits)
+        and len(vu.list_android_approvals()) == 0
+        and len(vu.gateway.spend.entries) == 1
+    )
+    checks.append(
+        {
+            "id": "e2e-07.accept_under_cap_dry_run",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} buy={buy_after_accept} "
+                f"receipts={len(receipts)} task={task.status.value if task else None} "
+                f"audits={len(audits)} dry_run="
+                f"{(accepted.execute.result or {}).get('dry_run') if accepted and accepted.execute and isinstance(accepted.execute.result, dict) else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Freeze path (INV-PAY-001): stale accepted approval blocked ---
+    vu_freeze = VirtualUser.bootstrap(root=repo)
+    freeze_turn = vu_freeze.inject_text(utterance)
+    freeze_prop = vu_freeze.last_shopping_propose
+    freeze_reason: Optional[str] = None
+    freeze_status: Optional[str] = None
+    if freeze_prop and freeze_prop.approval_id:
+        vu_freeze.gateway.accept(freeze_prop.approval_id)
+        vu_freeze.gateway.freeze_spending()
+        blocked_f = vu_freeze.gateway.execute(freeze_prop.approval_id)
+        freeze_reason = blocked_f.reason
+        item_f = vu_freeze.gateway.approvals.get(freeze_prop.approval_id)
+        freeze_status = item_f.status.value if item_f else None
+    buy_after_freeze = vu_freeze.buy_count()
+    freeze_ok = (
+        freeze_turn.allowed
+        and "buy_propose" in freeze_turn.tool_calls
+        and freeze_prop is not None
+        and freeze_prop.ok
+        and freeze_prop.approval_id is not None
+        and freeze_reason == "freeze_spending"
+        and buy_after_freeze == 0
+        and freeze_status == ApprovalStatus.ACCEPTED.value
+        and any(
+            r.get("reason") == "freeze_spending"
+            for r in vu_freeze.gateway.execute_rejections
+        )
+    )
+    checks.append(
+        {
+            "id": "e2e-07.freeze_blocks_execute",
+            "result": "PASS" if freeze_ok else "FAIL",
+            "detail": (
+                f"reason={freeze_reason} buy={buy_after_freeze} "
+                f"status={freeze_status} "
+                f"rejections={len(vu_freeze.gateway.execute_rejections)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Over cap path (INV-PAY-002) ---
+    vu_cap = VirtualUser.bootstrap(root=repo)
+    vu_cap.gateway.spend.config = SpendCapConfig(
+        daily_limit=10.0, weekly_limit=150.0, currency="EUR"
+    )
+    vu_cap.shopping.spend_caps = vu_cap.gateway.spend.config
+    cap_turn = vu_cap.inject_text(utterance)
+    cap_prop = vu_cap.last_shopping_propose
+    cap_accept = (
+        vu_cap.accept_approval(cap_prop.approval_id)
+        if cap_prop and cap_prop.approval_id
+        else None
+    )
+    cap_reason = (
+        cap_accept.execute.reason
+        if cap_accept and cap_accept.execute
+        else getattr(cap_accept, "reason", None)
+    )
+    buy_after_cap = vu_cap.buy_count()
+    cap_ok = (
+        cap_turn.allowed
+        and "buy_propose" in cap_turn.tool_calls
+        and cap_prop is not None
+        and cap_prop.ok
+        and cap_prop.price == 29.99
+        and cap_accept is not None
+        and (not cap_accept.ok)
+        and cap_reason == "spend_cap_daily"
+        and buy_after_cap == 0
+        and any(
+            r.get("reason") == "spend_cap_daily"
+            for r in vu_cap.gateway.execute_rejections
+        )
+    )
+    checks.append(
+        {
+            "id": "e2e-07.over_cap_blocked",
+            "result": "PASS" if cap_ok else "FAIL",
+            "detail": (
+                f"reason={cap_reason} buy={buy_after_cap} "
+                f"price={getattr(cap_prop, 'price', None)} "
+                f"rejections={len(vu_cap.gateway.execute_rejections)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Deny path (merge gate) ---
+    vu_deny = VirtualUser.bootstrap(root=repo)
+    deny_turn = vu_deny.inject_text(utterance)
+    denied_prop = vu_deny.last_shopping_propose
+    buy_before_deny = vu_deny.buy_count()
+    denied = (
+        vu_deny.deny_approval(denied_prop.approval_id)
+        if denied_prop and denied_prop.approval_id
+        else None
+    )
+    buy_after_deny = vu_deny.buy_count()
+    late_exec = (
+        vu_deny.gateway.execute(denied_prop.approval_id)
+        if denied_prop and denied_prop.approval_id
+        else None
+    )
+    deny_task = (
+        vu_deny.purchase_store.get(denied_prop.task_id)
+        if denied_prop and denied_prop.task_id
+        else None
+    )
+    deny_ok = (
+        deny_turn.allowed
+        and "buy_propose" in deny_turn.tool_calls
+        and denied_prop is not None
+        and denied_prop.ok
+        and denied_prop.approval_id is not None
+        and buy_before_deny == 0
+        and denied is not None
+        and denied.status == ApprovalStatus.DENIED.value
+        and buy_after_deny == 0
+        and late_exec is not None
+        and (not late_exec.ok)
+        and deny_task is not None
+        and deny_task.status == PurchaseStatus.DENIED
+        and not deny_task.is_success
+        and len(vu_deny.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-07.deny_buys_nothing",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"deny_status={denied.status if denied else None} "
+                f"buy_before={buy_before_deny} buy_after={buy_after_deny} "
+                f"late={getattr(late_exec, 'reason', None)} "
+                f"task={deny_task.status.value if deny_task else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = E2E07Result(
+        result=overall,
+        checks=checks,
+        accept_approval_id=proposed.approval_id if proposed else None,
+        deny_approval_id=denied_prop.approval_id if denied_prop else None,
+        freeze_approval_id=freeze_prop.approval_id if freeze_prop else None,
+        cap_approval_id=cap_prop.approval_id if cap_prop else None,
+        buy_count_after_accept=buy_after_accept,
+        buy_count_after_deny=buy_after_deny,
+        buy_count_after_freeze=buy_after_freeze,
+        buy_count_after_cap=buy_after_cap,
+        proposed_price=proposed.price if proposed else None,
+        freeze_reason=freeze_reason,
+        cap_reason=str(cap_reason) if cap_reason else None,
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        vu.catcher.write_json(out / "outbound-messages.json")
+        (out / "purchases.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": {
+                        "buy_count": buy_after_accept,
+                        "price": proposed.price if proposed else None,
+                        "task": task.to_dict() if task else None,
+                        "receipts": len(receipts),
+                        "audits": [a.to_dict() for a in audits] if audits else [],
+                        "spend_entries": len(vu.gateway.spend.entries),
+                    },
+                    "freeze_path": {
+                        "buy_count": buy_after_freeze,
+                        "reason": freeze_reason,
+                        "approval_status": freeze_status,
+                        "rejections": list(vu_freeze.gateway.execute_rejections),
+                    },
+                    "cap_path": {
+                        "buy_count": buy_after_cap,
+                        "reason": cap_reason,
+                        "daily_limit": vu_cap.gateway.spend.config.daily_limit,
+                        "rejections": list(vu_cap.gateway.execute_rejections),
+                    },
+                    "deny_path": {
+                        "buy_count": buy_after_deny,
+                        "task": deny_task.to_dict() if deny_task else None,
+                        "late_execute_reason": getattr(late_exec, "reason", None),
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": vu.android_inbox.snapshot(),
+                    "freeze_path": vu_freeze.android_inbox.snapshot(),
+                    "cap_path": vu_cap.android_inbox.snapshot(),
+                    "deny_path": vu_deny.android_inbox.snapshot(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "audit.json").write_text(
+            json.dumps(
+                {
+                    "accept_audits": [a.to_dict() for a in audits] if audits else [],
+                    "freeze_rejections": list(vu_freeze.gateway.execute_rejections),
+                    "cap_rejections": list(vu_cap.gateway.execute_rejections),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            out,
+            layer="e2e-07",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-07",
+                "gate": True,
+                "utterance": utterance,
+                "accept_approval_id": proposed.approval_id if proposed else None,
+                "deny_approval_id": denied_prop.approval_id if denied_prop else None,
+                "freeze_approval_id": freeze_prop.approval_id if freeze_prop else None,
+                "cap_approval_id": cap_prop.approval_id if cap_prop else None,
+                "buy_count_after_accept": buy_after_accept,
+                "buy_count_after_deny": buy_after_deny,
+                "buy_count_after_freeze": buy_after_freeze,
+                "buy_count_after_cap": buy_after_cap,
+                "proposed_price": proposed.price if proposed else None,
+                "freeze_reason": freeze_reason,
+                "cap_reason": cap_reason,
+                "t6_exit": overall == "PASS",
+                "invariants": ["INV-PAY-001", "INV-PAY-002"],
+                "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-07",
+                        "python3 scripts/run_e2e_07.py",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/e2e-07/",
+                },
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-07 Shopping with cap/freeze: WhatsApp "
+                        f"{utterance!r} proposes hard approve with price "
+                        "and buy_count=0; Accept under cap → one dry-run "
+                        "purchase + receipt/audit; freeze blocks execute "
+                        "(stale accepted, not cancelled); over cap → "
+                        "spend_cap_daily + buy=0; Deny leaves buy_count=0 "
+                        "(T6 exit / merge gate deny path)"
+                    ),
+                    "result": overall,
+                    "flow": "E2E-07",
+                    "gate": True,
+                    "t6_exit": overall == "PASS",
+                    "checks": [c["id"] for c in checks],
+                    "invariants": ["INV-PAY-001", "INV-PAY-002"],
+                    "commands": [
+                        "python3 scripts/run_e2e_07.py",
+                        "make e2e-07",
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/e2e-07/report.json",
+                        "artifacts/test/e2e-07/verification.json",
+                        "artifacts/test/e2e-07/purchases.json",
+                        "artifacts/test/e2e-07/approvals.json",
+                        "artifacts/test/e2e-07/audit.json",
+                        "artifacts/test/e2e-07/outbound-messages.json",
+                    ],
+                    "accept_approval_id": proposed.approval_id if proposed else None,
+                    "deny_approval_id": denied_prop.approval_id if denied_prop else None,
+                    "buy_count_after_accept": buy_after_accept,
+                    "buy_count_after_deny": buy_after_deny,
+                    "buy_count_after_freeze": buy_after_freeze,
+                    "buy_count_after_cap": buy_after_cap,
+                    "proposed_price": proposed.price if proposed else None,
+                    "freeze_reason": freeze_reason,
+                    "cap_reason": cap_reason,
                 },
                 indent=2,
                 sort_keys=True,

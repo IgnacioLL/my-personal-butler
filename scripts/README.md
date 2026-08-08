@@ -9,6 +9,9 @@
 | [`run_e2e_03.py`](./run_e2e_03.py) | E2E-03 Todo WhatsApp → Android journey (also invoked by test:ci) |
 | [`run_e2e_04.py`](./run_e2e_04.py) | E2E-04 Calendar soft confirm journey (also invoked by test:ci) |
 | [`run_e2e_05.py`](./run_e2e_05.py) | E2E-05 Diet plan → groceries journey (also invoked by test:ci) |
+| [`run_e2e_06.py`](./run_e2e_06.py) | E2E-06 Booksy propose → approve → book (also invoked by test:ci; T5) |
+| [`run_e2e_07.py`](./run_e2e_07.py) | E2E-07 Shopping with cap / freeze (+ deny; also invoked by test:ci; T6) |
+| [`run_e2e_09.py`](./run_e2e_09.py) | E2E-09 Ignored hard approval expiry (also invoked by test:ci) |
 | [`backup-restore-placeholder.sh`](./backup-restore-placeholder.sh) | Documented backup/restore paths (no cloud in CI) |
 
 ```bash
@@ -21,6 +24,9 @@ make e2e-02                          # E2E-02 alone (habit escalation; T4)
 make e2e-03                          # E2E-03 alone
 make e2e-04                          # E2E-04 alone
 make e2e-05                          # E2E-05 alone
+make e2e-06                          # E2E-06 alone (Booksy; T5)
+make e2e-07                          # E2E-07 alone (shopping cap/freeze; T6)
+make e2e-09                          # E2E-09 alone (hard approval expiry)
 ```
 
 `PYTHONPATH` is set to `src/` so `harness`, `policy`, and `invariants` import cleanly.

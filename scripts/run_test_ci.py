@@ -40,6 +40,7 @@ from harness.virtual_user import (  # noqa: E402
     run_e2e_05,
     run_e2e_05_structure,
     run_e2e_06,
+    run_e2e_07,
     run_e2e_09,
     run_t2_approval_inbox,
 )
@@ -438,6 +439,23 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
             }
         )
 
+    e2e07_dir = ROOT / "artifacts" / "test" / "e2e-07"
+    journey07 = run_e2e_07(
+        root=ROOT,
+        artifacts_dir=e2e07_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey07.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": True,
+                "flow": "E2E-07",
+            }
+        )
+
     e2e09_dir = ROOT / "artifacts" / "test" / "e2e-09"
     journey09 = run_e2e_09(
         root=ROOT,
@@ -465,6 +483,7 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         and journey04.ok
         and journey05.ok
         and journey06.ok
+        and journey07.ok
         and journey09.ok
         else "FAIL"
     )
@@ -481,6 +500,7 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
                 "E2E-04",
                 "E2E-05",
                 "E2E-06",
+                "E2E-07",
                 "E2E-09",
             ],
             "e2e_01_artifacts": "artifacts/test/e2e-01/",
@@ -489,9 +509,11 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
             "e2e_04_artifacts": "artifacts/test/e2e-04/",
             "e2e_05_artifacts": "artifacts/test/e2e-05/",
             "e2e_06_artifacts": "artifacts/test/e2e-06/",
+            "e2e_07_artifacts": "artifacts/test/e2e-07/",
             "e2e_09_artifacts": "artifacts/test/e2e-09/",
             "t4_exit": journey02.ok,
             "t5_exit": journey06.ok,
+            "t6_exit": journey07.ok,
             "harness": "VirtualUser",
         },
     )
@@ -506,6 +528,7 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
             "E2E-04",
             "E2E-05",
             "E2E-06",
+            "E2E-07",
             "E2E-09",
         ],
     }
@@ -3471,6 +3494,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/e2e-04/",
                     "artifacts/test/e2e-05/",
                     "artifacts/test/e2e-06/",
+                    "artifacts/test/e2e-07/",
                     "artifacts/test/e2e-09/",
                     "artifacts/test/task-03/",
                     "artifacts/test/task-04/",
@@ -3487,6 +3511,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-19/",
                     "artifacts/test/task-20/",
                     "artifacts/test/task-21/",
+                    "artifacts/test/task-22/",
                 ],
             },
         },
@@ -3501,7 +3526,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "groceries gates + TASK-17 outbound voice calls (INV-APPR-005) + "
             "TASK-19 Booksy stub bookings (INV-BOOK-001/002) + "
             "E2E-06 propose→approve→book (+ deny) + E2E-09 expiry (T5) + "
-            "TASK-21 shopping dry-run + spend caps/freeze (INV-PAY-001/002): "
+            "TASK-21 shopping dry-run + spend caps/freeze (INV-PAY-001/002) + "
+            "E2E-07 shopping cap/freeze (+ deny gate; T6): "
             "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
             "Android projection equality; calendar soft-confirm (INV-APPR-003); "
             "diet plan with banned-ingredient absence + grocery todos; "
@@ -3512,6 +3538,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "failed booking never marks success; shopping propose buy_count=0; "
             "Accept under cap → dry-run receipt/audit; freeze blocks stale accepted "
             "approval execute; cap breach → spend_cap_* rejection artifact; "
+            "E2E-07 deny path leaves buy_count=0; "
             "fail-closed on broken INV"
         ),
         "result": overall,
@@ -3529,6 +3556,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/e2e-04/verification.json",
             "artifacts/test/e2e-05/verification.json",
             "artifacts/test/e2e-06/verification.json",
+            "artifacts/test/e2e-07/verification.json",
             "artifacts/test/e2e-09/verification.json",
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
@@ -3545,6 +3573,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-19/verification.json",
             "artifacts/test/task-20/verification.json",
             "artifacts/test/task-21/verification.json",
+            "artifacts/test/task-22/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -3559,9 +3588,11 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "E2E-04",
             "E2E-05",
             "E2E-06",
+            "E2E-07",
             "E2E-09",
         ],
         "t5_exit": overall == "PASS" and not broken,
+        "t6_exit": overall == "PASS" and not broken,
         "e2e07_ready": overall == "PASS" and not broken,
     }
     (out_dir / "verification.json").write_text(
@@ -5480,6 +5511,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "make e2e-04",
                         "make e2e-05",
                         "make e2e-06",
+                        "make e2e-07",
                         "make e2e-09",
                     ],
                     "artifacts": [
@@ -5490,6 +5522,124 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-21/audit.json",
                         "artifacts/test/task-21/outbound-messages.json",
                         "artifacts/test/task-21/merchant-catalog.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-22 E2E-07 Shopping with cap / freeze (+ deny) — T6 exit.
+    # Fail-closed must not stomp happy-path task-22 / e2e-07 verification.
+    e2e07_checks = [
+        c
+        for L in layers
+        if L["layer"] == "e2e"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("e2e-07.")
+    ]
+    pay_invs_t22 = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-PAY-")
+    ]
+    task22_pass = (
+        bool(e2e07_checks)
+        and all(c.get("result") == "PASS" for c in e2e07_checks if c.get("gate", True))
+        and bool(pay_invs_t22)
+        and all(c.get("result") == "PASS" for c in pay_invs_t22)
+    )
+    if not broken:
+        task22 = ROOT / "artifacts" / "test" / "task-22"
+        task22.mkdir(parents=True, exist_ok=True)
+        journey07 = run_e2e_07(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "e2e-07",
+            write_artifacts=True,
+        )
+        t6_exit = journey07.ok and task22_pass
+        write_report(
+            task22,
+            layer="task-22",
+            result="PASS" if t6_exit else "FAIL",
+            checks=e2e07_checks + pay_invs_t22,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-07",
+                "gate": True,
+                "t6_exit": t6_exit,
+                "buy_count_after_accept": journey07.buy_count_after_accept,
+                "buy_count_after_deny": journey07.buy_count_after_deny,
+                "buy_count_after_freeze": journey07.buy_count_after_freeze,
+                "buy_count_after_cap": journey07.buy_count_after_cap,
+                "proposed_price": journey07.proposed_price,
+                "freeze_reason": journey07.freeze_reason,
+                "cap_reason": journey07.cap_reason,
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-07",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-22/",
+                },
+            },
+        )
+        (task22 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "TASK-22 / T6 exit: E2E-07 Shopping with cap/freeze gated "
+                        "green (propose price + buy=0; Accept under cap → dry-run "
+                        "receipt/audit; freeze blocks execute; over cap → "
+                        "spend_cap_daily; Deny leaves buy_count=0); INV-PAY-001/002 "
+                        "intact"
+                    ),
+                    "result": "PASS" if t6_exit else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-07",
+                    "gate": True,
+                    "t6_exit": t6_exit,
+                    "e2e07_result": journey07.result,
+                    "buy_count_after_accept": journey07.buy_count_after_accept,
+                    "buy_count_after_deny": journey07.buy_count_after_deny,
+                    "buy_count_after_freeze": journey07.buy_count_after_freeze,
+                    "buy_count_after_cap": journey07.buy_count_after_cap,
+                    "proposed_price": journey07.proposed_price,
+                    "freeze_reason": journey07.freeze_reason,
+                    "cap_reason": journey07.cap_reason,
+                    "checks": [c.get("id") for c in e2e07_checks + pay_invs_t22],
+                    "invariants": ["INV-PAY-001", "INV-PAY-002"],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-02",
+                        "make e2e-03",
+                        "make e2e-04",
+                        "make e2e-05",
+                        "make e2e-06",
+                        "make e2e-07",
+                        "make e2e-09",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-22/report.json",
+                        "artifacts/test/task-22/verification.json",
+                        "artifacts/test/e2e-07/verification.json",
+                        "artifacts/test/e2e-07/purchases.json",
+                        "artifacts/test/e2e-07/approvals.json",
+                        "artifacts/test/e2e-07/audit.json",
+                        "artifacts/test/e2e-07/outbound-messages.json",
                     ],
                 },
                 indent=2,
