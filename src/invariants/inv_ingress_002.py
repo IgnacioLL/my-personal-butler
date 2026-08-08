@@ -97,6 +97,14 @@ def check(ctx: dict[str, Any]) -> dict[str, Any]:
             ),
         ),
         (
+            "newsletter_channel",
+            InboundWhatsAppMessage(
+                sender="12036399@newsletter",
+                body="channel noise",
+                is_group=False,
+            ),
+        ),
+        (
             "stranger_in_group",
             InboundWhatsAppMessage(
                 sender="+19999999999",
@@ -172,6 +180,26 @@ def check(ctx: dict[str, Any]) -> dict[str, Any]:
             "broken_allow_all did not surface group side effects — fail-closed proof weak"
         )
 
+    # Misconfigured allowlist that includes a Channel JID must still ignore it
+    # (Channels are non-DM; INV-INGRESS-002 / groups_disabled wins over allowlist hit).
+    if not broken:
+        ch = MockWhatsAppTransport(
+            allowlist=["12036399@newsletter"],
+            catcher=OutboundMessageCatcher(),
+            groups_enabled=False,
+        )
+        ch_result = ch.inject_text("12036399@newsletter", "allowlisted channel")
+        if ch_result.allowed or ch.counters.total or ch.catcher.count():
+            failures.append(
+                f"newsletter_on_allowlist: effects "
+                f"(allowed={ch_result.allowed}, reason={ch_result.reason}, "
+                f"counters={ch.counters.snapshot()})"
+            )
+        elif ch_result.reason != "groups_disabled":
+            failures.append(
+                f"newsletter_on_allowlist: expected groups_disabled got {ch_result.reason}"
+            )
+
     # Mixed: allowlisted DM then group — DM may increment; group must not.
     mixed = MockWhatsAppTransport(
         allowlist=allowlist,
@@ -212,7 +240,7 @@ def check(ctx: dict[str, Any]) -> dict[str, Any]:
         "id": INV_ID,
         "result": "PASS",
         "detail": (
-            "groups ignored (is_group, group_id, @g.us, broadcast); "
+            "groups ignored (is_group, group_id, @g.us, broadcast, @newsletter); "
             "DM positive path unaffected; counters stable on group"
         ),
     }

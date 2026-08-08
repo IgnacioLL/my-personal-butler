@@ -14,7 +14,9 @@ from typing import Iterable
 _INVISIBLE = re.compile(
     "[\u200b\u200c\u200d\u200e\u200f\ufeff\u00ad\u2060\u2066\u2067\u2068\u2069]"
 )
-_GROUP_JID_HINTS = ("@g.us", "@broadcast", "group:")
+# Non-DM WhatsApp surfaces (groups, status/broadcast lists, Channels).
+# @lid is a personal identity form — do not treat as group.
+_GROUP_JID_HINTS = ("@g.us", "@broadcast", "@newsletter", "group:")
 
 
 @dataclass(frozen=True)
