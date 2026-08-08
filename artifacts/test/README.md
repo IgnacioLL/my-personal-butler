@@ -13,7 +13,7 @@ artifacts/test/<task-or-flow>/
   diffs/       # self-mod proposals
 ```
 
-## CI layout (TASK-01 / T0)
+## CI layout (TASK-01 / T0 + E2E-01 gate)
 
 ```text
 artifacts/test/ci/
@@ -25,6 +25,15 @@ artifacts/test/ci/
   contract/outbound-messages.json
   integration/report.json
   integration/outbound-messages.json
+  e2e/report.json        # gate-tagged E2E layer
+
+artifacts/test/e2e-01/
+  report.json
+  report.md
+  verification.json
+  outbound-messages.json
+  reminders.json
+  trace.jsonl
 ```
 
 Contents are gitignored except this README and `.gitkeep`. See [`agent-plan/testing/harnesses-and-fixtures.md`](../../agent-plan/testing/harnesses-and-fixtures.md).
@@ -33,5 +42,5 @@ Contents are gitignored except this README and `.gitkeep`. See [`agent-plan/test
 
 ```bash
 make test-ci && make test-ci-fail-closed
-# Audit: artifacts/test/ci/report.json and verification.json
+# Audit: artifacts/test/ci/report.json and artifacts/test/e2e-01/verification.json
 ```

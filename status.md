@@ -390,5 +390,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-07 done.  
-**Next:** TASK-08 E2E-01 (voice reminder journey).
+**Now:** TASK-08 in_progress (E2E-01).  
+**Next:** TASK-08 Agent B, then Phase 2 tasks (09–12).

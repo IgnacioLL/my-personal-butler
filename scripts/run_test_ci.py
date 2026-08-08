@@ -28,6 +28,7 @@ from harness.gateway_profile import gateway_data_paths, load_gateway_profile  # 
 from harness.ingress_sim import IngressSimulator  # noqa: E402
 from harness.inv_runner import run_all  # noqa: E402
 from harness.outbound import OutboundMessageCatcher  # noqa: E402
+from harness.virtual_user import run_e2e_01  # noqa: E402
 from harness.whatsapp_transport import MockWhatsAppTransport  # noqa: E402
 from policy.action_gateway import ActionGateway  # noqa: E402
 from policy.approvals import (  # noqa: E402
@@ -271,8 +272,44 @@ def run_contract(out_dir: Path, *, broken_allow_all: bool) -> dict[str, Any]:
     return {"layer": "contract", "result": result, "checks": checks}
 
 
+def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, Any]:
+    """Gate-tagged E2E flows (ci-gates.md). E2E-01 Virtual User voice reminder."""
+    checks: list[dict[str, Any]] = []
+    e2e_dir = ROOT / "artifacts" / "test" / "e2e-01"
+    journey = run_e2e_01(
+        root=ROOT,
+        artifacts_dir=e2e_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": True,
+                "flow": "E2E-01",
+            }
+        )
+    # Mirror a compact layer report under ci/e2e for aggregate layout.
+    layer_dir = out_dir / "e2e"
+    result = "PASS" if journey.ok else "FAIL"
+    write_report(
+        layer_dir,
+        layer="e2e",
+        result=result,
+        checks=checks,
+        extra={
+            "gate_flows": ["E2E-01"],
+            "e2e_01_artifacts": "artifacts/test/e2e-01/",
+            "harness": "VirtualUser",
+        },
+    )
+    return {"layer": "e2e", "result": result, "checks": checks, "flow": "E2E-01"}
+
+
 def run_integration(out_dir: Path) -> dict[str, Any]:
-    """Integration stubs — full Virtual User lands later; prove harness wiring."""
+    """Integration stubs + Virtual User wiring checks."""
     checks: list[dict[str, Any]] = []
     catcher = OutboundMessageCatcher()
     clock = FakeClock()
@@ -1202,6 +1239,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                 ],
                 "artifacts": [
                     "artifacts/test/ci/",
+                    "artifacts/test/e2e-01/",
                     "artifacts/test/task-03/",
                     "artifacts/test/task-04/",
                     "artifacts/test/task-05/",
@@ -1215,9 +1253,9 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     # Compact stamp for autonomous verification loops.
     stamp = {
         "claim": (
-            "WhatsApp ingress + memory R/W + transcription + reminders/habits: "
-            "allowlisted DM; voice→transcript/clarify; hot profile; "
-            "one-shot/recurring reminders via FakeClock; fail-closed on broken INV"
+            "WhatsApp ingress + memory R/W + transcription + reminders/habits + "
+            "E2E-01 Virtual User voice reminder gate: allowlisted DM; "
+            "voice→transcript/clarify; Auto reminder create; fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -1228,6 +1266,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         ],
         "artifacts": [
             "artifacts/test/ci/report.json",
+            "artifacts/test/e2e-01/verification.json",
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
             "artifacts/test/task-05/verification.json",
@@ -1240,6 +1279,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             if L["layer"] == "contract"
             for c in L.get("checks", [])
         ],
+        "gate_e2e": ["E2E-01"],
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",
@@ -1761,7 +1801,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--layer",
-        choices=("all", "unit", "contract", "integration"),
+        choices=("all", "unit", "contract", "integration", "e2e"),
         default="all",
     )
     args = parser.parse_args(argv)
@@ -1777,6 +1817,11 @@ def main(argv: list[str] | None = None) -> int:
             layers.append(run_contract(out_dir, broken_allow_all=args.break_invariant))
         if args.layer in ("all", "integration"):
             layers.append(run_integration(out_dir))
+        if args.layer in ("all", "e2e"):
+            # Fail-closed must not stomp happy-path E2E-01 verification stamps.
+            layers.append(
+                run_e2e(out_dir, write_flow_artifacts=not args.break_invariant)
+            )
         return aggregate(layers, out_dir, broken=args.break_invariant)
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
