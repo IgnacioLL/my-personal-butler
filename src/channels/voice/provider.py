@@ -16,7 +16,6 @@ from channels.voice.allowlist import (
     CALL_MODE_ALLOWED_TOOLS,
     CALL_MODE_FORBIDDEN_TOOLS,
     call_mode_block_reason,
-    is_call_mode_allowed,
 )
 from harness.clock import FakeClock
 from harness.outbound import OutboundMessage, OutboundMessageCatcher
