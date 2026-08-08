@@ -145,7 +145,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Deterministic router tests w/ stubs per `intelligence/models-and-credits.md`. No live Luna in CI gates.
 - **Acceptance:** Router unit/contract green.
 - **Result:** _(agent)_
@@ -371,6 +371,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:21 | TASK-08 | subagent-A | cursor-grok-4.5-high | implement | E2E-01 Virtual User voice reminder journey |
 | 2026-08-08 22:25 | TASK-08 | Agent A | cursor-grok-4.5-high | implement | E2E-01 gate green — VirtualUser + test:ci e2e layer; status → review |
 | 2026-08-08 22:28 | TASK-08 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-01/test-ci/fail-closed exit 0; due+no-hard spot-checks; T1 exit; status → done |
+| 2026-08-08 22:29 | TASK-09 | subagent-A | composer-2.5 | implement | Luna/Terra-Sol models router stubs |
 
 ---
 
@@ -392,5 +393,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-08 done; **T1 exit green** (E2E-01 voice reminder without human phone).  
-**Next:** Phase 1 remainder / Phase 2 tasks (09–12) per planner.
+**Now:** TASK-09 in_progress (models router).  
+**Next:** TASK-09 Agent B, then TASK-10 todos.
