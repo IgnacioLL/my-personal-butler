@@ -90,7 +90,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Seed memory profile template; hot profile + episodic write/read per `intelligence/memory.md`. Integration tests; no secrets in memory files.
 - **Acceptance:** Memory R/W integration green; fixture seed profile exists.
 - **Result:** _(agent)_
@@ -356,6 +356,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 21:59 | TASK-03 | subagent-A | cursor-grok-4.5-high | implement | Full WhatsApp ingress allowlist + mock transport + adversarial INV-INGRESS |
 | 2026-08-08 22:00 | TASK-03 | Agent A | cursor-grok-4.5-high | implement | Ingress hardened — mock transport + INV-INGRESS-001/002 adversarial + 003 scaffold; status → review |
 | 2026-08-08 22:00 | TASK-03 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; @newsletter non-DM fix; status → done |
+| 2026-08-08 22:02 | TASK-04 | subagent-A | composer-2.5 | implement | Personal memory profile template + R/W integration |
 
 ---
 
@@ -376,5 +377,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-03 done — ready for TASK-06 (transcription) and parallel TASK-04 / TASK-05 / TASK-09.  
-**Next:** Planner dispatch TASK-06 (depends on TASK-03) and/or TASK-04/05/09.
+**Now:** TASK-04 in_progress (memory).  
+**Next:** TASK-04 Agent B, then TASK-05 / TASK-06 / TASK-09.
