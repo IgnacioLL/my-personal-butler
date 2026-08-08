@@ -90,10 +90,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Seed memory profile template; hot profile + episodic write/read per `intelligence/memory.md`. Integration tests; no secrets in memory files.
 - **Acceptance:** Memory R/W integration green; fixture seed profile exists.
-- **Result:** Agent A — `make test-ci` PASS; `make test-ci-fail-closed` PASS. Hot profile (identity/prefs/goals) always loadable; episodic append/read; explicit remember survives harness reboot; `INV-MEM-001` rejects secret patterns; fixture `fixtures/memory/seed-profile.json` seeded. Ready for Agent B review.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: fixture `seed-profile.json` seeds hot profile (Alex, grandma household, peanuts allergy); explicit `remember` + episodic append survive `MemoryStore.open` reboot; `INV-MEM-001` + integration reject `token:`/`sk-`/AWS/GitHub patterns with no disk leak. `INV-MEM-*` intact; no gaps requiring code fix. Ready for TASK-07 (reminders can use `hot_context_lines` / `planning_constraints`).
 - **Artifacts:** `src/intelligence/memory/{store,secrets}.py`, `src/invariants/inv_mem_001.py`, `fixtures/memory/seed-profile.json`, `scripts/run_test_ci.py`, `artifacts/test/{ci,task-04}/` (runtime; gitignored)
 
 ### TASK-05 — Hosting / Gateway config skeleton + reboot durability hooks
@@ -358,6 +358,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:00 | TASK-03 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; @newsletter non-DM fix; status → done |
 | 2026-08-08 22:02 | TASK-04 | subagent-A | composer-2.5 | implement | Personal memory profile template + R/W integration |
 | 2026-08-08 22:05 | TASK-04 | Agent A | composer-2.5 | implement | Memory store + INV-MEM-001 + integration; status → review |
+| 2026-08-08 22:06 | TASK-04 | Agent B | composer-2.5 | review | PASS — re-ran test-ci + fail-closed; secrets/fixture/persistence spot-checks; status → done |
 
 ---
 
@@ -378,5 +379,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-04 review (memory — Agent B).  
-**Next:** TASK-05 / TASK-06 / TASK-09.
+**Now:** TASK-04 done (memory R/W).  
+**Next:** TASK-05 / TASK-06 / TASK-07 (blocked on TASK-06) / TASK-09.
