@@ -34,7 +34,7 @@ echo ""
 
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
-echo "==> layers: unit → contract/INV-* → integration → e2e (E2E-01 + E2E-02 + E2E-03 + E2E-04 + E2E-05 gates)"
+echo "==> layers: unit → contract/INV-* → integration → e2e (E2E-01..06 + E2E-09 gates)"
 # Capture exit under set -e so we still print FAIL + artifact paths.
 set +e
 python3 "$ROOT/scripts/run_test_ci.py" "${EXTRA[@]}"
@@ -53,5 +53,7 @@ echo "    e2e-02:    artifacts/test/e2e-02/report.json"
 echo "    e2e-03:    artifacts/test/e2e-03/report.json"
 echo "    e2e-04:    artifacts/test/e2e-04/report.json"
 echo "    e2e-05:    artifacts/test/e2e-05/report.json"
+echo "    e2e-06:    artifacts/test/e2e-06/report.json"
+echo "    e2e-09:    artifacts/test/e2e-09/report.json"
 echo "    Agent B re-run: see artifacts/test/ci/report.json → agent_b_rerun"
 exit "$status"
