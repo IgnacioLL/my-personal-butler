@@ -137,6 +137,7 @@ class SttStub:
         manifest: Mapping[str, Any] | None = None,
         overrides: Mapping[str, str] | None = None,
         max_bytes: int | None = None,
+        max_duration_sec: float | None = None,
         clarification_default: str | None = None,
     ) -> None:
         if manifest is not None:
@@ -146,6 +147,11 @@ class SttStub:
 
         self.max_bytes = int(
             max_bytes if max_bytes is not None else data.get("max_bytes") or 1024
+        )
+        self.max_duration_sec = float(
+            max_duration_sec
+            if max_duration_sec is not None
+            else data.get("max_duration_sec") or 120
         )
         self.clarification_default = (
             clarification_default
@@ -216,6 +222,7 @@ class SttStub:
         *,
         path: str | None = None,
         audio_bytes: int | None = None,
+        duration_sec: float | None = None,
     ) -> SttResult:
         """Transcribe one voice note by fixture id or path.
 
@@ -229,6 +236,7 @@ class SttStub:
                 "fixture_id": audio_fixture_id,
                 "path": path,
                 "audio_bytes": audio_bytes,
+                "duration_sec": duration_sec,
                 "resolved": clip.id if clip else None,
             }
         )
@@ -244,8 +252,15 @@ class SttStub:
                 meta={"reason": "unknown_fixture"},
             )
 
-        # Bound max size (manifest bytes or caller-supplied).
+        # Bound max size / duration (manifest values or caller-supplied).
         size = audio_bytes if audio_bytes is not None else clip.bytes
+        duration = (
+            duration_sec if duration_sec is not None else clip.duration_sec
+        )
+        oversize_msg = (
+            clip.clarification
+            or "That voice note is too long or large — please send a shorter clip."
+        )
         if size is not None and size > self.max_bytes:
             return SttResult(
                 fixture_id=clip.id,
@@ -253,11 +268,29 @@ class SttStub:
                 transcript=None,
                 confidence=0.0,
                 clarification_needed=True,
-                clarification_message=(
-                    clip.clarification
-                    or "That voice note is too long or large — please send a shorter clip."
-                ),
-                meta={"bytes": size, "max_bytes": self.max_bytes},
+                clarification_message=oversize_msg,
+                meta={
+                    "bytes": size,
+                    "max_bytes": self.max_bytes,
+                    "duration_sec": duration,
+                    "max_duration_sec": self.max_duration_sec,
+                },
+            )
+        if duration is not None and duration > self.max_duration_sec:
+            return SttResult(
+                fixture_id=clip.id,
+                outcome=SttOutcome.OVERSIZE,
+                transcript=None,
+                confidence=0.0,
+                clarification_needed=True,
+                clarification_message=oversize_msg,
+                meta={
+                    "bytes": size,
+                    "max_bytes": self.max_bytes,
+                    "duration_sec": duration,
+                    "max_duration_sec": self.max_duration_sec,
+                    "reason": "duration",
+                },
             )
 
         if clip.outcome == SttOutcome.OVERSIZE:
@@ -267,11 +300,13 @@ class SttStub:
                 transcript=None,
                 confidence=0.0,
                 clarification_needed=True,
-                clarification_message=(
-                    clip.clarification
-                    or "That voice note is too long or large — please send a shorter clip."
-                ),
-                meta={"bytes": size, "max_bytes": self.max_bytes},
+                clarification_message=oversize_msg,
+                meta={
+                    "bytes": size,
+                    "max_bytes": self.max_bytes,
+                    "duration_sec": duration,
+                    "max_duration_sec": self.max_duration_sec,
+                },
             )
 
         transcript = clip.expected_transcript
@@ -361,6 +396,7 @@ class SttStub:
         return {
             "clip_ids": sorted(self._by_id),
             "max_bytes": self.max_bytes,
+            "max_duration_sec": self.max_duration_sec,
             "call_count": len(self.calls),
             "calls": list(self.calls),
         }

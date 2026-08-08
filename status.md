@@ -112,10 +112,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-03, TASK-01
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** STT stub + audio fixture pack; every voice note → transcript or clarification (`INV-INGRESS-003`); optional TTS policy hooks. See `intelligence/transcription.md`.
 - **Acceptance:** Fixture map audio→transcript; E2E-01 dependency ready.
-- **Result:** PASS (Agent A implement) — STT stub maps `fixtures/audio/manifest.json` id/path → transcript (+ empty/garbage/oversize/low-confidence); WhatsApp mock transport runs voice → `[Audio] …` turn or clarification (never silent hard-action guess); TTS spy enforces inbound/never/always mode rules; `INV-INGRESS-003` fully enforced. `make test-ci` + `make test-ci-fail-closed` green. E2E-01 fixture `fx-reminder` ready (“Remind me Sunday at 18:00 to call grandma.”). Ready for Agent B review; TASK-07/E2E-01 can consume pipeline.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: `fx-reminder` → `[Audio] Remind me Sunday at 18:00 to call grandma.`; empty/garbage/oversize/unknown/low-conf buy → clarification; no hard tools on unclear audio (`INV-INGRESS-003`). Review fix: enforce manifest `max_duration_sec` (duration-only oversize) — was declared but unused. E2E-01 STT dependency ready. Ready for TASK-07.
 - **Artifacts:** `src/intelligence/transcription/{stt,tts,pipeline}.py`, `fixtures/audio/{manifest.json,*.ogg}`, `src/harness/whatsapp_transport.py`, `src/invariants/inv_ingress_003.py`, `scripts/run_test_ci.py`, `artifacts/test/task-06/`
 
 ### TASK-07 — Reminders + habits (fake clock)
@@ -364,6 +364,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:06 | TASK-05 | Agent B | composer-2.5 | review | PASS — re-ran test-ci + fail-closed; restart/accept-once spot-checks; status → done |
 | 2026-08-08 22:10 | TASK-06 | subagent-A | cursor-grok-4.5-high | implement | STT stub + audio fixtures + INV-INGRESS-003 transcription path |
 | 2026-08-08 22:12 | TASK-06 | Agent A | cursor-grok-4.5-high | implement | STT+TTS+pipeline wired; INV-INGRESS-003 full; status → review |
+| 2026-08-08 22:15 | TASK-06 | Agent B | cursor-grok-4.5-high | review | PASS — re-ran test-ci + fail-closed; duration bound fix; status → done |
 
 ---
 
@@ -385,5 +386,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-06 transcription — Agent B review.  
-**Next:** TASK-07 reminders (after TASK-06 done), then E2E-01.
+**Now:** TASK-06 done — ready for TASK-07 reminders.  
+**Next:** TASK-07 reminders (depends TASK-01/04/06), then E2E-01.

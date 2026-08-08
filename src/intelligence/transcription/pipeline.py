@@ -57,9 +57,13 @@ class TranscriptionPipeline:
         *,
         path: str | None = None,
         audio_bytes: int | None = None,
+        duration_sec: float | None = None,
     ) -> AudioTurnResult:
         stt = self.stt.transcribe(
-            audio_fixture_id, path=path, audio_bytes=audio_bytes
+            audio_fixture_id,
+            path=path,
+            audio_bytes=audio_bytes,
+            duration_sec=duration_sec,
         )
         if stt.clarification_needed or not stt.usable:
             return AudioTurnResult(

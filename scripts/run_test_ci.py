@@ -407,6 +407,41 @@ def _run_transcription_unit_checks(root: Path) -> list[dict[str, Any]]:
         }
     )
 
+    # Duration bound from manifest (independent of byte size).
+    long_ok_clip = SttStub(
+        manifest={
+            "clips": [
+                {
+                    "id": "fx-long-ok",
+                    "path": "fx-long-ok.ogg",
+                    "expected_transcript": "this would be a long note",
+                    "outcome": "ok",
+                    "confidence": 0.95,
+                    "bytes": 64,
+                    "duration_sec": 180,
+                }
+            ],
+            "max_bytes": 1024,
+            "max_duration_sec": 120,
+        }
+    )
+    over_dur = long_ok_clip.transcribe("fx-long-ok")
+    duration_bound_ok = (
+        over_dur.clarification_needed
+        and over_dur.outcome is SttOutcome.OVERSIZE
+        and (over_dur.meta or {}).get("reason") == "duration"
+    )
+    checks.append(
+        {
+            "id": "unit.stt.duration_bound",
+            "result": "PASS" if duration_bound_ok else "FAIL",
+            "detail": (
+                f"outcome={over_dur.outcome.value} "
+                f"meta={over_dur.meta} clarify={over_dur.clarification_needed}"
+            ),
+        }
+    )
+
     # TTS policy: inbound mode speaks only for audio; never mode never speaks.
     inbound = TtsPolicySpy(mode=TtsMode.INBOUND)
     never = TtsPolicySpy(mode=TtsMode.NEVER)
