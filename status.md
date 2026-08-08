@@ -200,7 +200,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-13
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Accept and deny paths; create count assertions.
 - **Acceptance:** report.json PASS.
 - **Result:** _(agent)_
@@ -385,6 +385,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:52 | TASK-13 | subagent-A | cursor-grok-4.5-high | implement | Calendar R/W + soft confirm + conflicts |
 | 2026-08-08 22:45 | TASK-13 | Agent A | cursor-grok-4.5-high | implement | Calendar store + soft confirm NL path; status → review |
 | 2026-08-08 22:50 | TASK-13 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01/e2e-03 exit 0; create_count/Deny/conflict spot-checks; E2E-04 ready; status → done |
+| 2026-08-08 22:55 | TASK-14 | subagent-A | composer-2.5 | implement | E2E-04 gate calendar soft confirm accept/deny |
 
 ---
 
@@ -407,5 +408,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-14 E2E-04 (calendar soft confirm Accept/Deny).  
-**Next:** TASK-14 Agent A implement.
+**Now:** TASK-14 in_progress (E2E-04).  
+**Next:** TASK-14 Agent B, then TASK-15 diet.
