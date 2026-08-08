@@ -21,7 +21,14 @@ def check(ctx: dict[str, Any]) -> dict[str, Any]:
     proposed = gw.propose(
         "book",
         "book dentist",
-        {"provider": "booksy", "slot": "2026-01-10T09:00:00Z"},
+        {
+            "provider": "booksy",
+            "shop": "Main St Barber",
+            "service": "dentist",
+            "start": "2026-01-10T09:00:00+00:00",
+            "end": "2026-01-10T09:45:00+00:00",
+            "slot": "2026-01-10T09:00:00Z",
+        },
     )
     assert proposed.approval_id
     gw.accept(proposed.approval_id)

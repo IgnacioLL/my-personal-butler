@@ -335,6 +335,13 @@ class ActionGateway:
             resolved["slot_id"] = chosen.get("id") or payload.get("slot_id")
             if chosen.get("stylist"):
                 resolved.setdefault("stylist", chosen["stylist"])
+        # Legacy harness payloads may only carry `slot` ISO start.
+        if not resolved.get("start") and payload.get("slot"):
+            resolved["start"] = str(payload["slot"])
+        if resolved.get("start") and not resolved.get("end"):
+            start_dt = datetime.fromisoformat(str(resolved["start"]).replace("Z", "+00:00"))
+            duration = int(payload.get("duration_minutes") or 45)
+            resolved["end"] = (start_dt + timedelta(minutes=duration)).isoformat()
         return resolved
 
     def _execute_book(self, payload: dict[str, Any]) -> Any:
