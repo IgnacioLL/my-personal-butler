@@ -1,0 +1,28 @@
+{
+  "events": [
+    {
+      "id": "evt-standup",
+      "title": "Standup",
+      "start": "2026-01-09T09:30:00+01:00",
+      "end": "2026-01-09T10:00:00+01:00",
+      "timezone": "Europe/Madrid",
+      "location": ""
+    },
+    {
+      "id": "evt-lunch",
+      "title": "Lunch with Sam",
+      "start": "2026-01-09T12:00:00+01:00",
+      "end": "2026-01-09T13:00:00+01:00",
+      "timezone": "Europe/Madrid",
+      "location": "Cafe"
+    },
+    {
+      "id": "evt-dentist",
+      "title": "Dentist",
+      "start": "2026-01-10T15:00:00+01:00",
+      "end": "2026-01-10T16:00:00+01:00",
+      "timezone": "Europe/Madrid",
+      "location": ""
+    }
+  ]
+}

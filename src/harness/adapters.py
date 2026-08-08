@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from capabilities.calendar.store import CalendarStore
+
 
 class _PauseAware(Protocol):
     @property
@@ -16,38 +18,52 @@ class _PauseAware(Protocol):
 
 @dataclass
 class StubCalendarAdapter:
-    """In-memory calendar — create/modify must only be called after soft confirm."""
+    """In-memory calendar — create/modify must only be called after soft confirm.
 
-    events: list[dict[str, Any]] = field(default_factory=list)
+    INV-APPR-003: create_count stays 0 until Accept executes.
+    """
+
+    store: CalendarStore = field(default_factory=CalendarStore)
     create_count: int = 0
     modify_count: int = 0
     cancel_count: int = 0
 
+    def attach_store(self, store: CalendarStore) -> None:
+        """Share an external CalendarStore (service + adapter see same events)."""
+        # Preserve any events already written via this adapter.
+        if self.store is store:
+            return
+        if self.store.events and not store.events:
+            for evt in self.store.list_all():
+                store.events[evt.id] = evt
+        elif self.store.events and store.events:
+            for evt in self.store.list_all():
+                if evt.id not in store.events:
+                    store.events[evt.id] = evt
+        self.store = store
+
+    @property
+    def events(self) -> list[dict[str, Any]]:
+        return [e.to_dict() for e in self.store.list_all()]
+
     def create(self, event: dict[str, Any]) -> dict[str, Any]:
         self.create_count += 1
-        stored = dict(event)
-        stored.setdefault("id", f"evt-{self.create_count}")
-        self.events.append(stored)
-        return stored
+        payload = dict(event)
+        payload.setdefault("id", f"evt-{self.create_count}")
+        stored = self.store.upsert_from_payload(payload)
+        return stored.to_dict()
 
     def modify(self, event_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         self.modify_count += 1
-        for evt in self.events:
-            if evt.get("id") == event_id:
-                evt.update(patch)
-                return evt
-        updated = {"id": event_id, **patch}
-        self.events.append(updated)
-        return updated
+        updated = self.store.modify(event_id, patch)
+        return updated.to_dict()
 
     def cancel(self, event_id: str) -> bool:
         self.cancel_count += 1
-        before = len(self.events)
-        self.events = [e for e in self.events if e.get("id") != event_id]
-        return len(self.events) < before
+        return self.store.cancel(event_id)
 
     def reset(self) -> None:
-        self.events.clear()
+        self.store.clear()
         self.create_count = 0
         self.modify_count = 0
         self.cancel_count = 0

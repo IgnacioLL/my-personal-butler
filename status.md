@@ -189,11 +189,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** In-memory calendar; conflict-aware suggestions; soft confirm before write (`INV-APPR-003`). Per `capabilities/calendar.md`.
 - **Acceptance:** Integration + E2E-04 green.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Implement complete (Agent A) — In-memory `CalendarStore` with conflict detection + free-slot suggestions; `CalendarService` proposes soft-confirm creates (adapter `create_count` stays 0 until Android Accept; Deny creates nothing). NL path “Schedule focus block Friday 09:00–11:00.” wired through VirtualUser. Unit + integration checks green; `INV-APPR-003` intact. `make test-ci`, `make test-ci-fail-closed`, `make e2e-01`, `make e2e-03` exit 0. E2E-04 ready for TASK-14 (accept/deny create-count assertions).
+- **Artifacts:** `src/capabilities/calendar/{store,parse,service}.py`, `src/harness/{adapters,virtual_user}.py`, `fixtures/calendar/busy-friday.json`, `scripts/run_test_ci.py`, `artifacts/test/task-13/`
 
 ### TASK-14 — E2E-04 Calendar soft confirm
 - **Phase:** 3 / T3
@@ -383,6 +383,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:48 | TASK-12 | subagent-A | composer-2.5 | implement | E2E-03 gate-tagged todo WhatsApp → Android; status → review |
 | 2026-08-08 22:40 | TASK-12 | Agent B | composer-2.5 | review | PASS — e2e-03/e2e-01/test-ci/fail-closed exit 0; gate:true artifacts; T2 exit; status → done |
 | 2026-08-08 22:52 | TASK-13 | subagent-A | cursor-grok-4.5-high | implement | Calendar R/W + soft confirm + conflicts |
+| 2026-08-08 22:45 | TASK-13 | Agent A | cursor-grok-4.5-high | implement | Calendar store + soft confirm NL path; status → review |
 
 ---
 
@@ -404,5 +405,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-12 done (E2E-03 gate green; T2 exit PASS).  
-**Next:** Phase 3 — TASK-13 (calendar read/write + soft confirm).
+**Now:** TASK-13 review (calendar soft confirm).  
+**Next:** TASK-13 Agent B, then TASK-14 E2E-04.

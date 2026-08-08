@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from capabilities.calendar.parse import looks_like_schedule
+from capabilities.calendar.service import CalendarService, ProposeCalendarResult
+from capabilities.calendar.store import CalendarStore
 from capabilities.reminders.parse import parse_reminder
 from capabilities.reminders.service import ReminderService
 from capabilities.reminders.store import ReminderStore
@@ -46,6 +49,7 @@ _REMIND_INTENT = re.compile(
 )
 
 EXPECTED_E2E03_UTTERANCE = "Add todo: buy oat milk."
+EXPECTED_E2E04_UTTERANCE = "Schedule focus block Friday 09:00–11:00."
 
 EXPECTED_E2E01_TRANSCRIPT = "Remind me Sunday at 18:00 to call grandma."
 E2E01_AUDIO_FIXTURE = "fx-reminder"
@@ -118,9 +122,11 @@ class VirtualUser:
     catcher: OutboundMessageCatcher
     store: ReminderStore
     todo_store: TodoStore
+    calendar_store: CalendarStore
     gateway: ActionGateway
     reminders: ReminderService
     todos: TodoService
+    calendar: CalendarService
     android: AndroidProjectionApi
     android_inbox: AndroidApprovalInboxApi
     transport: MockWhatsAppTransport
@@ -128,6 +134,7 @@ class VirtualUser:
     last_turn: Optional[TransportTurnResult] = None
     last_create: Any = None
     last_soft_confirm: Optional[ProposeResult] = None
+    last_calendar_propose: Optional[ProposeCalendarResult] = None
     last_accept: Optional[AcceptResult] = None
     last_deny: Optional[ApprovalProjection] = None
 
@@ -154,7 +161,9 @@ class VirtualUser:
         catcher = OutboundMessageCatcher()
         store = ReminderStore()
         todo_store = TodoStore()
+        calendar_store = CalendarStore()
         gateway = ActionGateway(clock=clock, reminders=store, todos=todo_store)
+        gateway.calendar.attach_store(calendar_store)
         reminders = ReminderService(
             store=store,
             clock=clock,
@@ -168,6 +177,14 @@ class VirtualUser:
             clock=clock,
             catcher=catcher,
             gateway=gateway,
+            recipient=owner,
+        )
+        calendar = CalendarService(
+            store=calendar_store,
+            clock=clock,
+            catcher=catcher,
+            gateway=gateway,
+            timezone=tz_name,
             recipient=owner,
         )
         android = AndroidProjectionApi(
@@ -185,9 +202,11 @@ class VirtualUser:
             catcher=catcher,
             store=store,
             todo_store=todo_store,
+            calendar_store=calendar_store,
             gateway=gateway,
             reminders=reminders,
             todos=todos,
+            calendar=calendar,
             android=android,
             android_inbox=android_inbox,
             transport=MockWhatsAppTransport(  # placeholder; rebound below
@@ -295,6 +314,47 @@ class VirtualUser:
             )
             return tools
 
+        if looks_like_schedule(body):
+            # Soft confirm — never write until Accept (INV-APPR-003).
+            if tier_for("calendar_create") != ApprovalTier.SOFT_CONFIRM:
+                transport._record_tool("agent.clarify")
+                transport._send_outbound(
+                    decision.normalized_sender or msg.sender,
+                    "Calendar create is not Soft confirm — refusing.",
+                    kind="clarification",
+                )
+                return ["agent.clarify"]
+
+            transport._record_tool("calendar_propose")
+            proposed = self.calendar.propose_from_utterance(
+                body,
+                timezone=self.timezone,
+                recipient=self.owner,
+                source_channel="whatsapp",
+            )
+            self.last_calendar_propose = proposed
+            self.last_soft_confirm = proposed.gateway_result
+            tools = ["calendar_propose"]
+            if proposed.ok and proposed.approval_id:
+                transport.counters.outbound_sends += 1
+                if msg.media_type == "audio":
+                    spoken = transport.pipeline.maybe_tts_reply(
+                        proposed.confirm_body, inbound_was_audio=True
+                    )
+                    if spoken:
+                        transport.counters.tts_speaks += 1
+                        transport.last_tts_spoken = True
+                return tools
+
+            transport._record_tool("agent.clarify")
+            tools.append("agent.clarify")
+            transport._send_outbound(
+                decision.normalized_sender or msg.sender,
+                f"Could not propose calendar event: {proposed.reason}",
+                kind="clarification",
+            )
+            return tools
+
         return default_agent_handler(transport, msg, decision)
 
     def inject_text(self, body: str, **kwargs: Any) -> TransportTurnResult:
@@ -367,25 +427,41 @@ class VirtualUser:
         source_channel: str = "whatsapp",
         **payload_extra: Any,
     ) -> ProposeResult:
-        """E2E-04 hook: create pending soft confirm; calendar create_count stays 0.
-
-        Shallow calendar path — full conflict-aware scheduling lands in TASK-13.
-        """
-        payload: dict[str, Any] = {
-            "title": title,
-            "start": start,
-            "end": end,
-            **payload_extra,
-        }
-        proposed = self.gateway.propose(
-            "calendar_create",
-            summary or f"Create calendar event: {title}",
-            payload,
-            source_channel=source_channel,
+        """E2E-04 hook: create pending soft confirm; calendar create_count stays 0."""
+        result = self.calendar.propose_event(
+            title=title,
+            start=start,
+            end=end,
+            summary=summary,
             source_utterance=source_utterance,
+            source_channel=source_channel,
+            **payload_extra,
         )
+        self.last_calendar_propose = result
+        proposed = result.gateway_result
+        if proposed is None:
+            # Fail closed — still return a ProposeResult-shaped object via gateway.
+            proposed = self.gateway.propose(
+                "calendar_create",
+                summary or f"Create calendar event: {title}",
+                {"title": title, "start": start, "end": end, **payload_extra},
+                source_channel=source_channel,
+                source_utterance=source_utterance,
+            )
         self.last_soft_confirm = proposed
         return proposed
+
+    def schedule_from_utterance(self, utterance: str) -> ProposeCalendarResult:
+        """NL path for E2E-04: Schedule … → pending soft confirm (create_count=0)."""
+        result = self.calendar.propose_from_utterance(
+            utterance,
+            timezone=self.timezone,
+            recipient=self.owner,
+            source_channel="whatsapp",
+        )
+        self.last_calendar_propose = result
+        self.last_soft_confirm = result.gateway_result
+        return result
 
     def calendar_create_count(self) -> int:
         return self.gateway.calendar.create_count
@@ -397,7 +473,8 @@ class VirtualUser:
         return [
             m
             for m in self.catcher.messages
-            if m.meta.get("kind") in {"reminder_confirm", "todo_confirm", "todo_dedup"}
+            if m.meta.get("kind")
+            in {"reminder_confirm", "todo_confirm", "todo_dedup", "calendar_propose"}
         ]
 
     def snapshot(self) -> dict[str, Any]:
@@ -412,6 +489,7 @@ class VirtualUser:
             "calendar": {
                 "create_count": self.gateway.calendar.create_count,
                 "events": list(self.gateway.calendar.events),
+                "store": self.calendar_store.to_dict(),
             },
             "outbound": self.catcher.to_list(),
             "approvals_pending": [a.id for a in self.pending_approvals()],

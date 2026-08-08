@@ -2,11 +2,13 @@
 
 OpenClaw-centric: these doubles sit beside Gateway skills/tools for CI; they are
 not a custom agent runtime.
+
+Import VirtualUser from harness.virtual_user directly — keeping it out of this
+package __init__ avoids circular imports with capabilities that need FakeClock.
 """
 
 from .clock import FakeClock
 from .outbound import OutboundMessage, OutboundMessageCatcher
-from .virtual_user import VirtualUser, run_e2e_01
 from .whatsapp_transport import (
     InboundWhatsAppMessage,
     MockWhatsAppTransport,
@@ -20,6 +22,4 @@ __all__ = [
     "OutboundMessage",
     "OutboundMessageCatcher",
     "SideEffectCounters",
-    "VirtualUser",
-    "run_e2e_01",
 ]

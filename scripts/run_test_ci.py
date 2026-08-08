@@ -29,6 +29,7 @@ from harness.ingress_sim import IngressSimulator  # noqa: E402
 from harness.inv_runner import run_all  # noqa: E402
 from harness.outbound import OutboundMessageCatcher  # noqa: E402
 from harness.virtual_user import (  # noqa: E402
+    EXPECTED_E2E04_UTTERANCE,
     VirtualUser,
     run_e2e_01,
     run_e2e_03,
@@ -61,6 +62,9 @@ from capabilities.reminders.store import (  # noqa: E402
     ReminderStatus,
     ReminderStore,
 )
+from capabilities.calendar.parse import looks_like_schedule, parse_schedule  # noqa: E402
+from capabilities.calendar.service import CalendarService  # noqa: E402
+from capabilities.calendar.store import CalendarStore  # noqa: E402
 from capabilities.todos.parse import looks_like_todo_add, parse_todo  # noqa: E402
 from capabilities.todos.service import TodoService  # noqa: E402
 from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normalize_title  # noqa: E402
@@ -250,6 +254,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_reminder_unit_checks())
     checks.extend(_run_todo_unit_checks())
     checks.extend(_run_android_approval_unit_checks())
+    checks.extend(_run_calendar_unit_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -442,6 +447,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_reminder_integration_checks(ROOT))
     checks.extend(_run_todo_integration_checks(ROOT))
     checks.extend(_run_android_approval_integration_checks(ROOT))
+    checks.extend(_run_calendar_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -1181,6 +1187,320 @@ def _run_todo_unit_checks() -> list[dict[str, Any]]:
     return checks
 
 
+def _run_calendar_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Calendar parse, conflicts, free slots, soft-confirm tier."""
+    checks: list[dict[str, Any]] = []
+    tz = ZoneInfo("Europe/Madrid")
+    monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+
+    parsed = parse_schedule(
+        EXPECTED_E2E04_UTTERANCE,
+        now=monday,
+        timezone="Europe/Madrid",
+    )
+    parse_ok = (
+        parsed.title.lower() == "focus block"
+        and parsed.start.isoformat() == "2026-01-09T09:00:00+01:00"
+        and parsed.end.isoformat() == "2026-01-09T11:00:00+01:00"
+        and parsed.weekday == 4
+    )
+    checks.append(
+        {
+            "id": "unit.calendar.parse_e2e04_utterance",
+            "result": "PASS" if parse_ok else "FAIL",
+            "detail": (
+                f"title={parsed.title!r} start={parsed.start.isoformat()} "
+                f"end={parsed.end.isoformat()}"
+            ),
+        }
+    )
+
+    hyphen = parse_schedule(
+        "Schedule focus block Friday 09:00-11:00.",
+        now=monday,
+        timezone="Europe/Madrid",
+    )
+    hyphen_ok = hyphen.start == parsed.start and hyphen.end == parsed.end
+    checks.append(
+        {
+            "id": "unit.calendar.parse_hyphen_range",
+            "result": "PASS" if hyphen_ok else "FAIL",
+            "detail": f"start={hyphen.start.isoformat()} end={hyphen.end.isoformat()}",
+        }
+    )
+
+    intent_ok = looks_like_schedule(EXPECTED_E2E04_UTTERANCE) and not looks_like_schedule(
+        "Remind me Sunday"
+    )
+    checks.append(
+        {
+            "id": "unit.calendar.intent_detection",
+            "result": "PASS" if intent_ok else "FAIL",
+            "detail": f"schedule={looks_like_schedule(EXPECTED_E2E04_UTTERANCE)}",
+        }
+    )
+
+    tier_ok = (
+        tier_for("calendar_create") == ApprovalTier.SOFT_CONFIRM
+        and tier_for("calendar_read") == ApprovalTier.AUTO
+        and tier_for("calendar_modify") == ApprovalTier.SOFT_CONFIRM
+    )
+    checks.append(
+        {
+            "id": "unit.calendar.soft_confirm_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": (
+                f"create={tier_for('calendar_create').value} "
+                f"read={tier_for('calendar_read').value}"
+            ),
+        }
+    )
+
+    store = CalendarStore()
+    fixture = root / "fixtures" / "calendar" / "busy-friday.json"
+    seeded = store.load_fixture(fixture)
+    focus_start = datetime(2026, 1, 9, 9, 0, 0, tzinfo=tz)
+    focus_end = datetime(2026, 1, 9, 11, 0, 0, tzinfo=tz)
+    conflicts = store.find_conflicts(focus_start, focus_end, title="Focus block")
+    conflict_ok = len(seeded) == 3 and len(conflicts) >= 1 and any(
+        c.existing_id == "evt-standup" for c in conflicts
+    )
+    checks.append(
+        {
+            "id": "unit.calendar.conflict_detection",
+            "result": "PASS" if conflict_ok else "FAIL",
+            "detail": (
+                f"seeded={len(seeded)} conflicts={len(conflicts)} "
+                f"ids={[c.existing_id for c in conflicts]}"
+            ),
+        }
+    )
+
+    slots = store.suggest_free_slots(
+        day_start=datetime(2026, 1, 9, 9, 0, 0, tzinfo=tz),
+        day_end=datetime(2026, 1, 9, 18, 0, 0, tzinfo=tz),
+        duration=timedelta(hours=2),
+        limit=3,
+    )
+    # 09:00–11:00 overlaps standup; free 2h should start at/after 10:00 or later windows.
+    free_ok = len(slots) >= 1 and all(
+        store.find_conflicts(s.start, s.end) == [] for s in slots
+    )
+    checks.append(
+        {
+            "id": "unit.calendar.suggest_free_slots",
+            "result": "PASS" if free_ok else "FAIL",
+            "detail": f"slots={[s.to_dict() for s in slots]}",
+        }
+    )
+
+    # Touching endpoints do not conflict.
+    touch = store.find_conflicts(
+        datetime(2026, 1, 9, 10, 0, 0, tzinfo=tz),
+        datetime(2026, 1, 9, 12, 0, 0, tzinfo=tz),
+    )
+    # standup ends 10:00 — touching ok; lunch starts 12:00 — touching ok; none overlap half-open.
+    # Wait: 10:00-12:00 vs lunch 12:00-13:00 — no overlap. vs standup 09:30-10:00 — no overlap.
+    touch_ok = len(touch) == 0
+    checks.append(
+        {
+            "id": "unit.calendar.touching_endpoints_ok",
+            "result": "PASS" if touch_ok else "FAIL",
+            "detail": f"conflicts={len(touch)}",
+        }
+    )
+
+    return checks
+
+
+def _run_calendar_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Soft-confirm propose → Accept creates once; Deny creates nothing; NL path."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    tz = ZoneInfo("Europe/Madrid")
+    clock = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher = OutboundMessageCatcher()
+    store = CalendarStore()
+    gw = ActionGateway(clock=clock)
+    gw.calendar.attach_store(store)
+    svc = CalendarService(
+        store=store,
+        clock=clock,
+        catcher=catcher,
+        gateway=gw,
+        timezone="Europe/Madrid",
+        recipient=owner,
+    )
+
+    proposed = svc.propose_from_utterance(EXPECTED_E2E04_UTTERANCE)
+    pending = gw.approvals.list(status=ApprovalStatus.PENDING)
+    propose_ok = (
+        proposed.ok
+        and proposed.approval_id is not None
+        and proposed.tier == ApprovalTier.SOFT_CONFIRM.value
+        and not proposed.executed
+        and gw.calendar.create_count == 0
+        and len(store.list_all()) == 0
+        and len(pending) == 1
+        and catcher.count() == 1
+        and catcher.messages[0].meta.get("kind") == "calendar_propose"
+        and proposed.parsed is not None
+        and proposed.parsed.start.isoformat() == "2026-01-09T09:00:00+01:00"
+    )
+    checks.append(
+        {
+            "id": "integration.calendar.nl_propose_soft_confirm",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"ok={proposed.ok} approval={proposed.approval_id} "
+                f"create={gw.calendar.create_count} pending={len(pending)} "
+                f"reason={proposed.reason}"
+            ),
+        }
+    )
+
+    inbox = AndroidApprovalInboxApi(gw)
+    accepted = inbox.accept(proposed.approval_id) if proposed.approval_id else None
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and gw.calendar.create_count == 1
+        and len(store.list_all()) == 1
+        and store.list_all()[0].title.lower() == "focus block"
+    )
+    checks.append(
+        {
+            "id": "integration.calendar.accept_creates_once",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} create={gw.calendar.create_count} "
+                f"events={len(store.list_all())}"
+            ),
+        }
+    )
+
+    # Deny path: seed conflict store separately.
+    clock2 = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher2 = OutboundMessageCatcher()
+    store2 = CalendarStore()
+    gw2 = ActionGateway(clock=clock2)
+    gw2.calendar.attach_store(store2)
+    svc2 = CalendarService(
+        store=store2,
+        clock=clock2,
+        catcher=catcher2,
+        gateway=gw2,
+        timezone="Europe/Madrid",
+        recipient=owner,
+    )
+    denied_prop = svc2.propose_from_utterance("Schedule dentist Saturday 15:00–16:00.")
+    inbox2 = AndroidApprovalInboxApi(gw2)
+    denied = inbox2.deny(denied_prop.approval_id) if denied_prop.approval_id else None
+    late = gw2.execute(denied_prop.approval_id) if denied_prop.approval_id else None
+    deny_ok = (
+        denied_prop.ok
+        and denied is not None
+        and denied.status == ApprovalStatus.DENIED.value
+        and gw2.calendar.create_count == 0
+        and len(store2.list_all()) == 0
+        and late is not None
+        and (not late.ok)
+    )
+    checks.append(
+        {
+            "id": "integration.calendar.deny_creates_nothing",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"deny={denied.status if denied else None} create={gw2.calendar.create_count} "
+                f"late={getattr(late, 'reason', None)}"
+            ),
+        }
+    )
+
+    # Conflict-aware proposal still soft-confirms (calls out conflict; no write).
+    store3 = CalendarStore()
+    store3.load_fixture(root / "fixtures" / "calendar" / "busy-friday.json")
+    clock3 = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher3 = OutboundMessageCatcher()
+    gw3 = ActionGateway(clock=clock3)
+    gw3.calendar.attach_store(store3)
+    svc3 = CalendarService(
+        store=store3,
+        clock=clock3,
+        catcher=catcher3,
+        gateway=gw3,
+        timezone="Europe/Madrid",
+        recipient=owner,
+    )
+    conflicted = svc3.propose_from_utterance(EXPECTED_E2E04_UTTERANCE)
+    conflict_ok = (
+        conflicted.ok
+        and len(conflicted.conflicts) >= 1
+        and len(conflicted.suggestions) >= 1
+        and gw3.calendar.create_count == 0
+        and "Conflict" in conflicted.confirm_body
+        and len(store3.list_all()) == 3  # seeded only; no write
+    )
+    checks.append(
+        {
+            "id": "integration.calendar.conflict_aware_propose",
+            "result": "PASS" if conflict_ok else "FAIL",
+            "detail": (
+                f"conflicts={len(conflicted.conflicts)} "
+                f"suggestions={len(conflicted.suggestions)} "
+                f"create={gw3.calendar.create_count} body={conflicted.confirm_body!r}"
+            ),
+        }
+    )
+
+    # Virtual User WhatsApp NL → pending soft confirm (E2E-04 readiness).
+    vu = VirtualUser.bootstrap(root=root)
+    turn = vu.inject_text(EXPECTED_E2E04_UTTERANCE)
+    vu_ok = (
+        turn.allowed
+        and "calendar_propose" in turn.tool_calls
+        and vu.calendar_create_count() == 0
+        and len(vu.pending_approvals()) == 1
+        and vu.last_calendar_propose is not None
+        and vu.last_calendar_propose.ok
+        and vu.last_calendar_propose.parsed is not None
+        and vu.last_calendar_propose.parsed.start.isoformat()
+        == "2026-01-09T09:00:00+01:00"
+    )
+    checks.append(
+        {
+            "id": "integration.calendar.virtual_user_nl_path",
+            "result": "PASS" if vu_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} create={vu.calendar_create_count()} "
+                f"pending={len(vu.pending_approvals())}"
+            ),
+        }
+    )
+
+    # Accept via Android after NL propose.
+    appr_id = vu.last_calendar_propose.approval_id if vu.last_calendar_propose else None
+    vu_accept = vu.accept_approval(appr_id) if appr_id else None
+    vu_accept_ok = (
+        vu_accept is not None
+        and vu_accept.ok
+        and vu.calendar_create_count() == 1
+        and len(vu.calendar_store.list_all()) == 1
+    )
+    checks.append(
+        {
+            "id": "integration.calendar.virtual_user_accept",
+            "result": "PASS" if vu_accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(vu_accept, 'ok', None)} "
+                f"create={vu.calendar_create_count()}"
+            ),
+        }
+    )
+
+    return checks
+
+
 def _run_android_approval_unit_checks() -> list[dict[str, Any]]:
     """Android approval inbox API: list/Accept/Deny/Edit + soft calendar gate."""
     checks: list[dict[str, Any]] = []
@@ -1849,6 +2169,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-09/",
                     "artifacts/test/task-10/",
                     "artifacts/test/task-11/",
+                    "artifacts/test/task-13/",
                 ],
             },
         },
@@ -1860,7 +2181,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "WhatsApp ingress + memory R/W + transcription + reminders/habits + "
             "E2E-01 voice reminder + E2E-03 todo sync gates: allowlisted DM; "
             "voice→transcript/clarify; Auto reminder/todo create; Android projection "
-            "equality; fail-closed on broken INV"
+            "equality; calendar soft-confirm (INV-APPR-003); fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -1881,6 +2202,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-09/verification.json",
             "artifacts/test/task-10/verification.json",
             "artifacts/test/task-11/verification.json",
+            "artifacts/test/task-13/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -2665,6 +2987,151 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         stamp_data["result"] = "PASS" if (task11_pass and t2_demo.ok) else "FAIL"
         stamp_path.write_text(
             json.dumps(stamp_data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-13 calendar read/write + soft confirm.
+    # Fail-closed must not stomp happy-path task-13 verification.
+    calendar_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.calendar.")
+    ]
+    calendar_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.calendar.")
+    ]
+    task13_checks = calendar_unit + calendar_integration
+    task13_pass = (
+        all(c.get("result") == "PASS" for c in task13_checks) if task13_checks else False
+    )
+    if not broken:
+        task13 = ROOT / "artifacts" / "test" / "task-13"
+        task13.mkdir(parents=True, exist_ok=True)
+        demo_vu = VirtualUser.bootstrap(root=ROOT)
+        demo_turn = demo_vu.inject_text(EXPECTED_E2E04_UTTERANCE)
+        demo_prop = demo_vu.last_calendar_propose
+        create_before = demo_vu.calendar_create_count()
+        demo_accept = (
+            demo_vu.accept_approval(demo_prop.approval_id)
+            if demo_prop and demo_prop.approval_id
+            else None
+        )
+        create_after_accept = demo_vu.calendar_create_count()
+
+        # Deny path on a fresh VU.
+        deny_vu = VirtualUser.bootstrap(root=ROOT)
+        deny_prop = deny_vu.schedule_from_utterance("Schedule dentist Saturday 15:00–16:00.")
+        deny_create_before = deny_vu.calendar_create_count()
+        deny_result = (
+            deny_vu.deny_approval(deny_prop.approval_id) if deny_prop.approval_id else None
+        )
+        deny_create_after = deny_vu.calendar_create_count()
+
+        (task13 / "calendar.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": {
+                        "utterance": EXPECTED_E2E04_UTTERANCE,
+                        "create_before_accept": create_before,
+                        "create_after_accept": create_after_accept,
+                        "events": demo_vu.gateway.calendar.events,
+                        "approval_id": demo_prop.approval_id if demo_prop else None,
+                        "parsed_start": (
+                            demo_prop.parsed.start.isoformat()
+                            if demo_prop and demo_prop.parsed
+                            else None
+                        ),
+                    },
+                    "deny_path": {
+                        "create_before": deny_create_before,
+                        "create_after": deny_create_after,
+                        "events": deny_vu.gateway.calendar.events,
+                        "deny_status": deny_result.status if deny_result else None,
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        demo_vu.catcher.write_json(task13 / "outbound-messages.json")
+        (task13 / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "accept": demo_vu.android_inbox.snapshot(),
+                    "deny": deny_vu.android_inbox.snapshot(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            task13,
+            layer="task-13",
+            result="PASS" if task13_pass else "FAIL",
+            checks=task13_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-04 (prep)",
+                "nl_tools": getattr(demo_turn, "tool_calls", None),
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-13/",
+                },
+            },
+        )
+        (task13 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "In-memory calendar + conflict-aware soft confirm (INV-APPR-003): "
+                        "NL 'Schedule focus block Friday 09:00–11:00.' proposes pending "
+                        "soft confirm with create_count=0; Accept creates once; Deny "
+                        "creates nothing; E2E-04 ready"
+                    ),
+                    "result": "PASS" if task13_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-04",
+                    "e2e04_ready": task13_pass,
+                    "invariants": ["INV-APPR-003"],
+                    "unit_checks": [c.get("id") for c in calendar_unit],
+                    "integration_checks": [c.get("id") for c in calendar_integration],
+                    "create_before_accept": create_before,
+                    "create_after_accept": create_after_accept,
+                    "deny_create_after": deny_create_after,
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-03",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-13/report.json",
+                        "artifacts/test/task-13/verification.json",
+                        "artifacts/test/task-13/calendar.json",
+                        "artifacts/test/task-13/approvals.json",
+                        "artifacts/test/task-13/outbound-messages.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
 
