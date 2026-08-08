@@ -19,6 +19,9 @@ from zoneinfo import ZoneInfo
 from capabilities.calendar.parse import looks_like_schedule
 from capabilities.calendar.service import CalendarService, ProposeCalendarResult
 from capabilities.calendar.store import CalendarStore
+from capabilities.diet.constraints import banned_terms, text_violations
+from capabilities.diet.parse import EXPECTED_E2E05_UTTERANCE, looks_like_meal_plan
+from capabilities.diet.service import DietService, PlanMealsResult
 from capabilities.reminders.parse import parse_reminder
 from capabilities.reminders.service import ReminderService
 from capabilities.reminders.store import ReminderStore
@@ -36,6 +39,7 @@ from harness.whatsapp_transport import (
     TransportTurnResult,
     default_agent_handler,
 )
+from intelligence.memory.store import MemoryStore
 from intelligence.transcription.pipeline import TranscriptionPipeline
 from intelligence.transcription.tts import TtsMode
 from policy.action_gateway import ActionGateway, ProposeResult
@@ -97,6 +101,7 @@ class E2E03Result:
 
 
 @dataclass
+@dataclass
 class E2E04Result:
     """Machine-check result for E2E-04 calendar soft confirm journey."""
 
@@ -106,6 +111,22 @@ class E2E04Result:
     deny_approval_id: Optional[str]
     calendar_create_after_accept: int
     calendar_create_after_deny: int
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
+class E2E05StructureResult:
+    """E2E-05 structure checks (prep for TASK-16 gate; eval lane non-blocking)."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    plan_date: Optional[str]
+    grocery_todo_count: int
+    eval_score: Optional[float]
     artifacts_dir: str
 
     @property
@@ -145,6 +166,8 @@ class VirtualUser:
     reminders: ReminderService
     todos: TodoService
     calendar: CalendarService
+    diet: DietService
+    memory: MemoryStore
     android: AndroidProjectionApi
     android_inbox: AndroidApprovalInboxApi
     transport: MockWhatsAppTransport
@@ -153,6 +176,7 @@ class VirtualUser:
     last_create: Any = None
     last_soft_confirm: Optional[ProposeResult] = None
     last_calendar_propose: Optional[ProposeCalendarResult] = None
+    last_plan_meals: Optional[PlanMealsResult] = None
     last_accept: Optional[AcceptResult] = None
     last_deny: Optional[ApprovalProjection] = None
 
@@ -205,6 +229,19 @@ class VirtualUser:
             timezone=tz_name,
             recipient=owner,
         )
+        mem_root = repo / "artifacts" / "test" / ".vu-memory"
+        mem_root.mkdir(parents=True, exist_ok=True)
+        memory = MemoryStore.seed_from_fixture(mem_root, seed_path) if seed_path.is_file() else MemoryStore.seed(mem_root)
+        diet = DietService(
+            calendar=calendar_store,
+            todo_store=todo_store,
+            clock=clock,
+            catcher=catcher,
+            memory=memory,
+            gateway=gateway,
+            timezone=tz_name,
+            recipient=owner,
+        )
         android = AndroidProjectionApi(
             store=todo_store,
             clock=clock,
@@ -225,6 +262,8 @@ class VirtualUser:
             reminders=reminders,
             todos=todos,
             calendar=calendar,
+            diet=diet,
+            memory=memory,
             android=android,
             android_inbox=android_inbox,
             transport=MockWhatsAppTransport(  # placeholder; rebound below
@@ -373,6 +412,45 @@ class VirtualUser:
             )
             return tools
 
+        if looks_like_meal_plan(body):
+            if tier_for("diet_draft") != ApprovalTier.AUTO:
+                transport._record_tool("agent.clarify")
+                transport._send_outbound(
+                    decision.normalized_sender or msg.sender,
+                    "Diet draft is not Auto — refusing.",
+                    kind="clarification",
+                )
+                return ["agent.clarify"]
+
+            transport._record_tool("diet_draft")
+            planned = self.diet.plan_from_utterance(
+                body,
+                recipient=self.owner,
+                timezone=self.timezone,
+            )
+            self.last_plan_meals = planned
+            tools = ["diet_draft"]
+            if planned.ok:
+                transport.counters.outbound_sends += 1
+                if msg.media_type == "audio":
+                    spoken = transport.pipeline.maybe_tts_reply(
+                        planned.confirm_body, inbound_was_audio=True
+                    )
+                    if spoken:
+                        transport.counters.tts_speaks += 1
+                        transport.last_tts_spoken = True
+                tools.append("todo_add")
+                return tools
+
+            transport._record_tool("agent.clarify")
+            tools.append("agent.clarify")
+            transport._send_outbound(
+                decision.normalized_sender or msg.sender,
+                f"Could not plan meals: {planned.reason}",
+                kind="clarification",
+            )
+            return tools
+
         return default_agent_handler(transport, msg, decision)
 
     def inject_text(self, body: str, **kwargs: Any) -> TransportTurnResult:
@@ -492,7 +570,13 @@ class VirtualUser:
             m
             for m in self.catcher.messages
             if m.meta.get("kind")
-            in {"reminder_confirm", "todo_confirm", "todo_dedup", "calendar_propose"}
+            in {
+                "reminder_confirm",
+                "todo_confirm",
+                "todo_dedup",
+                "calendar_propose",
+                "diet_plan",
+            }
         ]
 
     def snapshot(self) -> dict[str, Any]:
@@ -513,7 +597,200 @@ class VirtualUser:
             "approvals_pending": [a.id for a in self.pending_approvals()],
             "hard_approvals": [a.id for a in self.hard_approval_items()],
             "transport": self.transport.snapshot(),
+            "memory_constraints": self.memory.planning_constraints(),
+            "last_meal_plan": (
+                self.last_plan_meals.plan.to_dict()
+                if self.last_plan_meals and self.last_plan_meals.plan
+                else None
+            ),
         }
+
+    def grocery_todos(self) -> list[Any]:
+        return [
+            t
+            for t in self.todo_store.list_open()
+            if "grocery" in t.tags or t.title.lower().startswith("buy ")
+        ]
+
+
+def run_e2e_05_structure(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E05StructureResult:
+    """E2E-05 structure checks — diet plan → groceries (non-gate prep for TASK-16).
+
+    1. Seed memory with dislikes/allergies (fixture profile).
+    2. 'Plan meals for tomorrow.'
+    3. Structured plan + grocery todos; banned ingredients absent.
+    4. Optional eval lane score recorded (non-blocking).
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-05-structure")
+    checks: list[dict[str, Any]] = []
+
+    vu = VirtualUser.bootstrap(root=repo)
+    constraints = vu.memory.planning_constraints()
+    seed_ok = (
+        "peanuts" in constraints.get("allergies", [])
+        and "shellfish" in constraints.get("food_dislikes", [])
+        and constraints.get("diet_phase") == "low carb"
+    )
+    checks.append(
+        {
+            "id": "e2e-05.structure.memory_seeded",
+            "result": "PASS" if seed_ok else "FAIL",
+            "detail": str(constraints),
+            "gate": False,
+        }
+    )
+
+    turn = vu.inject_text(EXPECTED_E2E05_UTTERANCE)
+    planned = vu.last_plan_meals
+    agent_ok = (
+        turn.allowed
+        and "diet_draft" in turn.tool_calls
+        and planned is not None
+        and planned.ok
+        and planned.plan is not None
+    )
+    checks.append(
+        {
+            "id": "e2e-05.structure.agent_plans",
+            "result": "PASS" if agent_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} ok={getattr(planned, 'ok', None)} "
+                f"reason={getattr(planned, 'reason', None)}"
+            ),
+            "gate": False,
+        }
+    )
+
+    plan = planned.plan if planned else None
+    structured_ok = bool(
+        plan
+        and len(plan.meals) >= 3
+        and plan.grocery_items
+        and all(m.slot and m.name and m.ingredients for m in plan.meals)
+    )
+    checks.append(
+        {
+            "id": "e2e-05.structure.structured_plan",
+            "result": "PASS" if structured_ok else "FAIL",
+            "detail": (
+                f"meals={len(plan.meals) if plan else 0} "
+                f"grocery={len(plan.grocery_items) if plan else 0}"
+            ),
+            "gate": False,
+        }
+    )
+
+    banned = banned_terms(constraints)
+    violations: list[str] = []
+    if plan:
+        for meal in plan.meals:
+            blob = " ".join([meal.name, *meal.ingredients])
+            violations.extend(text_violations(blob, banned))
+        for item in plan.grocery_items:
+            violations.extend(text_violations(item, banned))
+    absent_ok = len(violations) == 0
+    checks.append(
+        {
+            "id": "e2e-05.structure.banned_absent",
+            "result": "PASS" if absent_ok else "FAIL",
+            "detail": f"violations={violations}",
+            "gate": False,
+        }
+    )
+
+    grocery = vu.grocery_todos()
+    grocery_ok = len(grocery) >= len(plan.grocery_items) if plan else False
+    checks.append(
+        {
+            "id": "e2e-05.structure.grocery_todos",
+            "result": "PASS" if grocery_ok else "FAIL",
+            "detail": f"grocery_todos={len(grocery)} items={len(plan.grocery_items) if plan else 0}",
+            "gate": False,
+        }
+    )
+
+    eval_score = planned.eval_result.score if planned and planned.eval_result else None
+    eval_ok = eval_score is not None and eval_score >= 0.6
+    checks.append(
+        {
+            "id": "e2e-05.structure.eval_lane_optional",
+            "result": "PASS" if eval_ok else "FAIL",
+            "detail": f"score={eval_score} blocking=false",
+            "gate": False,
+            "blocking": False,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = E2E05StructureResult(
+        result=overall,
+        checks=checks,
+        plan_date=plan.plan_date.isoformat() if plan else None,
+        grocery_todo_count=len(grocery),
+        eval_score=eval_score,
+        artifacts_dir=str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        write_report(
+            out,
+            layer="e2e-05-structure",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-05",
+                "gate": False,
+                "eval_lane_blocking": False,
+                "harness": "VirtualUser",
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-05 structure: memory constraints → plan meals for tomorrow "
+                        "→ structured plan + grocery todos; banned ingredients absent"
+                    ),
+                    "result": overall,
+                    "flow": "E2E-05",
+                    "gate": False,
+                    "e2e05_ready": overall == "PASS",
+                    "eval_lane_blocking": False,
+                    "eval_score": eval_score,
+                    "checks": [c["id"] for c in checks],
+                    "commands": ["./scripts/test-ci.sh", "make test-ci"],
+                    "artifacts": [
+                        "artifacts/test/e2e-05-structure/report.json",
+                        "artifacts/test/e2e-05-structure/verification.json",
+                        "artifacts/test/e2e-05-structure/meal-plan.json",
+                        "artifacts/test/e2e-05-structure/grocery-todos.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        if plan:
+            (out / "meal-plan.json").write_text(
+                json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        (out / "grocery-todos.json").write_text(
+            json.dumps(vu.todo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        vu.catcher.write_json(out / "outbound-messages.json")
+
+    return result
 
 
 def run_e2e_01(

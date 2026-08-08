@@ -30,10 +30,12 @@ from harness.inv_runner import run_all  # noqa: E402
 from harness.outbound import OutboundMessageCatcher  # noqa: E402
 from harness.virtual_user import (  # noqa: E402
     EXPECTED_E2E04_UTTERANCE,
+    EXPECTED_E2E05_UTTERANCE,
     VirtualUser,
     run_e2e_01,
     run_e2e_03,
     run_e2e_04,
+    run_e2e_05_structure,
     run_t2_approval_inbox,
 )
 from harness.whatsapp_transport import MockWhatsAppTransport  # noqa: E402
@@ -66,6 +68,10 @@ from capabilities.reminders.store import (  # noqa: E402
 from capabilities.calendar.parse import looks_like_schedule, parse_schedule  # noqa: E402
 from capabilities.calendar.service import CalendarService  # noqa: E402
 from capabilities.calendar.store import CalendarStore  # noqa: E402
+from capabilities.diet.constraints import banned_terms, check_meal_plan, text_violations  # noqa: E402
+from capabilities.diet.parse import looks_like_meal_plan, parse_meal_plan_request  # noqa: E402
+from capabilities.diet.planner import build_meal_plan, schedule_hints  # noqa: E402
+from capabilities.diet.service import DietService  # noqa: E402
 from capabilities.todos.parse import looks_like_todo_add, parse_todo  # noqa: E402
 from capabilities.todos.service import TodoService  # noqa: E402
 from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normalize_title  # noqa: E402
@@ -256,6 +262,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_todo_unit_checks())
     checks.extend(_run_android_approval_unit_checks())
     checks.extend(_run_calendar_unit_checks(ROOT))
+    checks.extend(_run_diet_unit_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -471,6 +478,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_todo_integration_checks(ROOT))
     checks.extend(_run_android_approval_integration_checks(ROOT))
     checks.extend(_run_calendar_integration_checks(ROOT))
+    checks.extend(_run_diet_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -1524,6 +1532,230 @@ def _run_calendar_integration_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
+def _run_diet_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Diet parse, constraint checks, planner selection."""
+    checks: list[dict[str, Any]] = []
+    tz = ZoneInfo("Europe/Madrid")
+    monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+
+    parsed = parse_meal_plan_request(EXPECTED_E2E05_UTTERANCE, now=monday)
+    parse_ok = (
+        parsed.target_phrase == "tomorrow"
+        and parsed.plan_date.isoformat() == "2026-01-06"
+    )
+    checks.append(
+        {
+            "id": "unit.diet.parse_tomorrow",
+            "result": "PASS" if parse_ok else "FAIL",
+            "detail": (
+                f"phrase={parsed.target_phrase!r} date={parsed.plan_date.isoformat()}"
+            ),
+        }
+    )
+
+    intent_ok = looks_like_meal_plan(EXPECTED_E2E05_UTTERANCE) and not looks_like_meal_plan(
+        "Add todo: buy oat milk"
+    )
+    checks.append(
+        {
+            "id": "unit.diet.intent_detection",
+            "result": "PASS" if intent_ok else "FAIL",
+            "detail": f"meal_plan={looks_like_meal_plan(EXPECTED_E2E05_UTTERANCE)}",
+        }
+    )
+
+    tier_ok = tier_for("diet_draft") == ApprovalTier.AUTO
+    checks.append(
+        {
+            "id": "unit.diet.auto_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": f"tier={tier_for('diet_draft').value}",
+        }
+    )
+
+    fixture = root / "fixtures" / "memory" / "seed-profile.json"
+    store = MemoryStore.seed_from_fixture(root / "artifacts" / "test" / ".unit-diet-mem", fixture)
+    constraints = store.planning_constraints()
+    banned = banned_terms(constraints)
+    banned_ok = "peanuts" in banned and "shellfish" in banned and "rice" in banned
+    checks.append(
+        {
+            "id": "unit.diet.banned_terms_from_memory",
+            "result": "PASS" if banned_ok else "FAIL",
+            "detail": f"banned={sorted(banned)}",
+        }
+    )
+
+    calendar = CalendarStore()
+    plan = build_meal_plan(
+        plan_date=parsed.plan_date,
+        timezone="Europe/Madrid",
+        constraints=constraints,
+        calendar=calendar,
+    )
+    check = check_meal_plan(
+        meals=[m.to_dict() for m in plan.meals],
+        grocery_items=plan.grocery_items,
+        constraints=constraints,
+    )
+    plan_ok = (
+        len(plan.meals) == 3
+        and check.ok
+        and all(len(text_violations(m.name, banned)) == 0 for m in plan.meals)
+    )
+    checks.append(
+        {
+            "id": "unit.diet.planner_respects_constraints",
+            "result": "PASS" if plan_ok else "FAIL",
+            "detail": (
+                f"meals={[m.name for m in plan.meals]} violations={check.violations}"
+            ),
+        }
+    )
+
+    # Late-night calendar event → quick dinner preference.
+    late_start = datetime(2026, 1, 6, 19, 0, 0, tzinfo=tz)
+    calendar.create(
+        title="Evening meeting",
+        start=late_start,
+        end=late_start + timedelta(hours=2, minutes=30),
+        timezone="Europe/Madrid",
+    )
+    late_night, busy_day, notes = schedule_hints(
+        calendar, parsed.plan_date, "Europe/Madrid"
+    )
+    late_plan = build_meal_plan(
+        plan_date=parsed.plan_date,
+        timezone="Europe/Madrid",
+        constraints=constraints,
+        calendar=calendar,
+    )
+    dinner = next(m for m in late_plan.meals if m.slot == "dinner")
+    schedule_ok = late_night and dinner.quick and len(notes) >= 1
+    checks.append(
+        {
+            "id": "unit.diet.schedule_late_night_quick_dinner",
+            "result": "PASS" if schedule_ok else "FAIL",
+            "detail": (
+                f"late_night={late_night} dinner={dinner.name!r} quick={dinner.quick} "
+                f"notes={notes}"
+            ),
+        }
+    )
+
+    return checks
+
+
+def _run_diet_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Diet service plans + grocery todos; Virtual User NL path; E2E-05 structure."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    tz = ZoneInfo("Europe/Madrid")
+    clock = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher = OutboundMessageCatcher()
+    calendar = CalendarStore()
+    todo_store = TodoStore()
+    mem_root = root / "artifacts" / "test" / ".integration-diet-mem"
+    memory = MemoryStore.seed_from_fixture(
+        mem_root, root / "fixtures" / "memory" / "seed-profile.json"
+    )
+    gw = ActionGateway(clock=clock, todos=todo_store)
+    gw.calendar.attach_store(calendar)
+    svc = DietService(
+        calendar=calendar,
+        todo_store=todo_store,
+        clock=clock,
+        catcher=catcher,
+        memory=memory,
+        gateway=gw,
+        timezone="Europe/Madrid",
+        recipient=owner,
+    )
+
+    planned = svc.plan_from_utterance(EXPECTED_E2E05_UTTERANCE)
+    constraints = memory.planning_constraints()
+    banned = banned_terms(constraints)
+    violations: list[str] = []
+    if planned.plan:
+        for meal in planned.plan.meals:
+            blob = " ".join([meal.name, *meal.ingredients])
+            violations.extend(text_violations(blob, banned))
+    service_ok = (
+        planned.ok
+        and planned.constraint_ok
+        and planned.plan is not None
+        and len(planned.plan.meals) == 3
+        and len(violations) == 0
+        and len(planned.grocery_todos) >= 1
+        and catcher.count() == 1
+        and catcher.messages[0].meta.get("kind") == "diet_plan"
+        and tier_for("diet_draft") == ApprovalTier.AUTO
+    )
+    checks.append(
+        {
+            "id": "integration.diet.plan_and_grocery_todos",
+            "result": "PASS" if service_ok else "FAIL",
+            "detail": (
+                f"ok={planned.ok} meals={len(planned.plan.meals) if planned.plan else 0} "
+                f"grocery_todos={len(planned.grocery_todos)} violations={violations} "
+                f"reason={planned.reason}"
+            ),
+        }
+    )
+
+    grocery_open = [
+        t for t in todo_store.list_open() if "grocery" in t.tags or t.title.startswith("Buy ")
+    ]
+    grocery_ok = len(grocery_open) >= len(planned.plan.grocery_items) if planned.plan else False
+    checks.append(
+        {
+            "id": "integration.diet.grocery_todos_tagged",
+            "result": "PASS" if grocery_ok else "FAIL",
+            "detail": f"open_grocery={len(grocery_open)}",
+        }
+    )
+
+    vu = VirtualUser.bootstrap(root=root)
+    turn = vu.inject_text(EXPECTED_E2E05_UTTERANCE)
+    vu_plan = vu.last_plan_meals
+    vu_ok = (
+        turn.allowed
+        and "diet_draft" in turn.tool_calls
+        and vu_plan is not None
+        and vu_plan.ok
+        and vu_plan.plan is not None
+        and len(vu.grocery_todos()) >= 1
+    )
+    checks.append(
+        {
+            "id": "integration.diet.virtual_user_nl_path",
+            "result": "PASS" if vu_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} grocery={len(vu.grocery_todos())} "
+                f"reason={getattr(vu_plan, 'reason', None)}"
+            ),
+        }
+    )
+
+    structure = run_e2e_05_structure(
+        root=root,
+        artifacts_dir=root / "artifacts" / "test" / "e2e-05-structure",
+        write_artifacts=True,
+    )
+    checks.append(
+        {
+            "id": "integration.diet.e2e05_structure",
+            "result": "PASS" if structure.ok else "FAIL",
+            "detail": (
+                f"result={structure.result} grocery={structure.grocery_todo_count} "
+                f"eval={structure.eval_score}"
+            ),
+        }
+    )
+
+    return checks
+
+
 def _run_android_approval_unit_checks() -> list[dict[str, Any]]:
     """Android approval inbox API: list/Accept/Deny/Edit + soft calendar gate."""
     checks: list[dict[str, Any]] = []
@@ -2194,6 +2426,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-10/",
                     "artifacts/test/task-11/",
                     "artifacts/test/task-13/",
+                    "artifacts/test/task-15/",
                 ],
             },
         },
@@ -2229,6 +2462,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-10/verification.json",
             "artifacts/test/task-11/verification.json",
             "artifacts/test/task-13/verification.json",
+            "artifacts/test/task-15/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -3152,6 +3386,113 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-13/calendar.json",
                         "artifacts/test/task-13/approvals.json",
                         "artifacts/test/task-13/outbound-messages.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-15 diet planning v1.
+    # Fail-closed must not stomp happy-path task-15 verification.
+    diet_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.diet.")
+    ]
+    diet_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.diet.")
+    ]
+    task15_checks = diet_unit + diet_integration
+    task15_pass = (
+        all(c.get("result") == "PASS" for c in task15_checks) if task15_checks else False
+    )
+    if not broken:
+        task15 = ROOT / "artifacts" / "test" / "task-15"
+        task15.mkdir(parents=True, exist_ok=True)
+        structure = run_e2e_05_structure(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "e2e-05-structure",
+            write_artifacts=True,
+        )
+        demo_vu = VirtualUser.bootstrap(root=ROOT)
+        demo_turn = demo_vu.inject_text(EXPECTED_E2E05_UTTERANCE)
+        demo_plan = demo_vu.last_plan_meals
+        (task15 / "meal-plan.json").write_text(
+            json.dumps(
+                demo_plan.plan.to_dict() if demo_plan and demo_plan.plan else {},
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (task15 / "grocery-todos.json").write_text(
+            json.dumps(demo_vu.todo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        demo_vu.catcher.write_json(task15 / "outbound-messages.json")
+        write_report(
+            task15,
+            layer="task-15",
+            result="PASS" if task15_pass else "FAIL",
+            checks=task15_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-05 (structure)",
+                "eval_lane_blocking": False,
+                "nl_tools": getattr(demo_turn, "tool_calls", None),
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-15/",
+                },
+            },
+        )
+        (task15 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "Diet planning v1: memory constraints + schedule → structured "
+                        "meal plan; banned ingredients absent; grocery todos created; "
+                        "E2E-05 structure ready"
+                    ),
+                    "result": "PASS" if task15_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-05",
+                    "e2e05_ready": task15_pass and structure.ok,
+                    "eval_lane_blocking": False,
+                    "eval_score": structure.eval_score,
+                    "unit_checks": [c.get("id") for c in diet_unit],
+                    "integration_checks": [c.get("id") for c in diet_integration],
+                    "grocery_todo_count": len(demo_vu.grocery_todos()),
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-03",
+                        "make e2e-04",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-15/report.json",
+                        "artifacts/test/task-15/verification.json",
+                        "artifacts/test/task-15/meal-plan.json",
+                        "artifacts/test/task-15/grocery-todos.json",
+                        "artifacts/test/task-15/outbound-messages.json",
+                        "artifacts/test/e2e-05-structure/verification.json",
                     ],
                 },
                 indent=2,
