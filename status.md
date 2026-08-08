@@ -222,11 +222,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-15
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Seed dislikes/allergies; assert absences + grocery todos.
 - **Acceptance:** T3 exit for diet path.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A) — `make e2e-05` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0. Gate-tagged E2E-05 in test:ci e2e layer: seed profile allergies/dislikes/low-carb → `Plan meals for tomorrow.` Auto `diet_draft` + 10 grocery `todo_add` rows tagged `grocery`+`diet`; banned terms (peanuts, shellfish, cilantro, rice) absent from meals/grocery items; eval lane score 0.9 (non-blocking). Fail-closed does not stomp task-16/e2e-05 verification (still PASS). INV-* intact (no weaken). **T3 exit ready** — E2E-04 + E2E-05 gates green.
+- **Artifacts:** `src/harness/virtual_user.py` (`run_e2e_05`, `E2E05Result`), `scripts/run_e2e_05.py`, `Makefile` (`e2e-05`), `scripts/run_test_ci.py` (e2e layer + task-16), `scripts/test-ci.sh`, `scripts/README.md`, `artifacts/test/e2e-05/` (runtime; gitignored), `artifacts/test/task-16/` (runtime; gitignored)
 
 ### TASK-17 — Outbound voice calls + escalation ladder
 - **Phase:** 4 / T4
@@ -392,6 +392,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:12 | TASK-15 | Agent A | composer-2.5 | implement | Diet v1 complete — constraints + grocery todos + E2E-05 structure; status → review |
 | 2026-08-08 23:15 | TASK-15 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed/e2e-01/03/04 exit 0; banned-absent + grocery todo spot-checks; E2E-05 ready; status → done |
 | 2026-08-08 23:16 | TASK-16 | subagent-A | composer-2.5 | implement | E2E-05 diet → groceries journey |
+| 2026-08-08 23:55 | TASK-16 | Agent A | composer-2.5 | implement | E2E-05 gate + test:ci e2e layer; T3 exit ready; status → review |
 
 ---
 
@@ -414,5 +415,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-16 in_progress (E2E-05).  
+**Now:** TASK-16 in review (E2E-05 gate).  
 **Next:** TASK-16 Agent B, then Phase 4 (TASK-17).

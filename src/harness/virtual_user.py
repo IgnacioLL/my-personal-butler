@@ -135,6 +135,22 @@ class E2E05StructureResult:
 
 
 @dataclass
+class E2E05Result:
+    """Machine-check result for E2E-05 diet plan → groceries journey."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    plan_date: Optional[str]
+    grocery_todo_count: int
+    eval_score: Optional[float]
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
 class T2ApprovalInboxResult:
     """Machine-check result for T2 Android approval inbox (Accept/Deny alone)."""
 
@@ -772,6 +788,210 @@ def run_e2e_05_structure(
                         "artifacts/test/e2e-05-structure/meal-plan.json",
                         "artifacts/test/e2e-05-structure/grocery-todos.json",
                     ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        if plan:
+            (out / "meal-plan.json").write_text(
+                json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        (out / "grocery-todos.json").write_text(
+            json.dumps(vu.todo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        vu.catcher.write_json(out / "outbound-messages.json")
+
+    return result
+
+
+def run_e2e_05(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E05Result:
+    """E2E-05 — Diet plan → groceries (gate-tagged).
+
+    1. Seed memory with dislikes/allergies (fixture profile).
+    2. 'Plan meals for tomorrow.'
+    3. Structured plan + grocery todos; banned ingredients absent.
+    4. Optional eval lane score recorded (non-blocking).
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-05")
+    checks: list[dict[str, Any]] = []
+
+    vu = VirtualUser.bootstrap(root=repo)
+    constraints = vu.memory.planning_constraints()
+    seed_ok = (
+        "peanuts" in constraints.get("allergies", [])
+        and "shellfish" in constraints.get("food_dislikes", [])
+        and constraints.get("diet_phase") == "low carb"
+    )
+    checks.append(
+        {
+            "id": "e2e-05.memory_seeded",
+            "result": "PASS" if seed_ok else "FAIL",
+            "detail": str(constraints),
+            "gate": True,
+        }
+    )
+
+    turn = vu.inject_text(EXPECTED_E2E05_UTTERANCE)
+    planned = vu.last_plan_meals
+    agent_ok = (
+        turn.allowed
+        and "diet_draft" in turn.tool_calls
+        and planned is not None
+        and planned.ok
+        and planned.plan is not None
+    )
+    checks.append(
+        {
+            "id": "e2e-05.agent_plans",
+            "result": "PASS" if agent_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} ok={getattr(planned, 'ok', None)} "
+                f"reason={getattr(planned, 'reason', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    plan = planned.plan if planned else None
+    structured_ok = bool(
+        plan
+        and len(plan.meals) >= 3
+        and plan.grocery_items
+        and all(m.slot and m.name and m.ingredients for m in plan.meals)
+    )
+    checks.append(
+        {
+            "id": "e2e-05.structured_plan",
+            "result": "PASS" if structured_ok else "FAIL",
+            "detail": (
+                f"meals={len(plan.meals) if plan else 0} "
+                f"grocery={len(plan.grocery_items) if plan else 0}"
+            ),
+            "gate": True,
+        }
+    )
+
+    banned = banned_terms(constraints)
+    violations: list[str] = []
+    if plan:
+        for meal in plan.meals:
+            blob = " ".join([meal.name, *meal.ingredients])
+            violations.extend(text_violations(blob, banned))
+        for item in plan.grocery_items:
+            violations.extend(text_violations(item, banned))
+    absent_ok = len(violations) == 0
+    checks.append(
+        {
+            "id": "e2e-05.banned_absent",
+            "result": "PASS" if absent_ok else "FAIL",
+            "detail": f"violations={violations}",
+            "gate": True,
+        }
+    )
+
+    grocery = vu.grocery_todos()
+    grocery_ok = len(grocery) >= len(plan.grocery_items) if plan else False
+    checks.append(
+        {
+            "id": "e2e-05.grocery_todos",
+            "result": "PASS" if grocery_ok else "FAIL",
+            "detail": f"grocery_todos={len(grocery)} items={len(plan.grocery_items) if plan else 0}",
+            "gate": True,
+        }
+    )
+
+    eval_score = planned.eval_result.score if planned and planned.eval_result else None
+    eval_ok = eval_score is not None and eval_score >= 0.6
+    checks.append(
+        {
+            "id": "e2e-05.eval_lane_optional",
+            "result": "PASS" if eval_ok else "FAIL",
+            "detail": f"score={eval_score} blocking=false",
+            "gate": False,
+            "blocking": False,
+        }
+    )
+
+    gate_checks = [c for c in checks if c.get("gate", True) and c.get("blocking", True) is not False]
+    overall = "PASS" if all(c["result"] == "PASS" for c in gate_checks) else "FAIL"
+    result = E2E05Result(
+        result=overall,
+        checks=checks,
+        plan_date=plan.plan_date.isoformat() if plan else None,
+        grocery_todo_count=len(grocery),
+        eval_score=eval_score,
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        write_report(
+            out,
+            layer="e2e-05",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-05",
+                "gate": True,
+                "eval_lane_blocking": False,
+                "utterance": EXPECTED_E2E05_UTTERANCE,
+                "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-05",
+                        "python3 scripts/run_e2e_05.py",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/e2e-05/",
+                },
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-05 diet → groceries: seed memory with dislikes/allergies → "
+                        "'Plan meals for tomorrow.' → structured plan + grocery todos; "
+                        "banned ingredients absent"
+                    ),
+                    "result": overall,
+                    "flow": "E2E-05",
+                    "gate": True,
+                    "t3_exit": overall == "PASS",
+                    "eval_lane_blocking": False,
+                    "eval_score": eval_score,
+                    "checks": [c["id"] for c in checks],
+                    "commands": [
+                        "python3 scripts/run_e2e_05.py",
+                        "make e2e-05",
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/e2e-05/report.json",
+                        "artifacts/test/e2e-05/verification.json",
+                        "artifacts/test/e2e-05/meal-plan.json",
+                        "artifacts/test/e2e-05/grocery-todos.json",
+                        "artifacts/test/e2e-05/outbound-messages.json",
+                    ],
+                    "grocery_todo_count": len(grocery),
+                    "plan_date": plan.plan_date.isoformat() if plan else None,
                 },
                 indent=2,
                 sort_keys=True,

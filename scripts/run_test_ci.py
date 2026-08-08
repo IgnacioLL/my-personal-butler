@@ -35,6 +35,7 @@ from harness.virtual_user import (  # noqa: E402
     run_e2e_01,
     run_e2e_03,
     run_e2e_04,
+    run_e2e_05,
     run_e2e_05_structure,
     run_t2_approval_inbox,
 )
@@ -304,7 +305,7 @@ def run_contract(out_dir: Path, *, broken_allow_all: bool) -> dict[str, Any]:
 
 
 def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, Any]:
-    """Gate-tagged E2E flows (ci-gates.md). E2E-01 + E2E-03 + E2E-04 Virtual User journeys."""
+    """Gate-tagged E2E flows (ci-gates.md). E2E-01 + E2E-03 + E2E-04 + E2E-05 Virtual User journeys."""
     checks: list[dict[str, Any]] = []
     e2e01_dir = ROOT / "artifacts" / "test" / "e2e-01"
     journey01 = run_e2e_01(
@@ -357,11 +358,28 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
             }
         )
 
+    e2e05_dir = ROOT / "artifacts" / "test" / "e2e-05"
+    journey05 = run_e2e_05(
+        root=ROOT,
+        artifacts_dir=e2e05_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey05.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": check.get("gate", True),
+                "flow": "E2E-05",
+            }
+        )
+
     # Mirror a compact layer report under ci/e2e for aggregate layout.
     layer_dir = out_dir / "e2e"
     result = (
         "PASS"
-        if journey01.ok and journey03.ok and journey04.ok
+        if journey01.ok and journey03.ok and journey04.ok and journey05.ok
         else "FAIL"
     )
     write_report(
@@ -370,10 +388,11 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         result=result,
         checks=checks,
         extra={
-            "gate_flows": ["E2E-01", "E2E-03", "E2E-04"],
+            "gate_flows": ["E2E-01", "E2E-03", "E2E-04", "E2E-05"],
             "e2e_01_artifacts": "artifacts/test/e2e-01/",
             "e2e_03_artifacts": "artifacts/test/e2e-03/",
             "e2e_04_artifacts": "artifacts/test/e2e-04/",
+            "e2e_05_artifacts": "artifacts/test/e2e-05/",
             "harness": "VirtualUser",
         },
     )
@@ -381,7 +400,7 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
         "layer": "e2e",
         "result": result,
         "checks": checks,
-        "flows": ["E2E-01", "E2E-03", "E2E-04"],
+        "flows": ["E2E-01", "E2E-03", "E2E-04", "E2E-05"],
     }
 
 
@@ -2417,6 +2436,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/e2e-01/",
                     "artifacts/test/e2e-03/",
                     "artifacts/test/e2e-04/",
+                    "artifacts/test/e2e-05/",
                     "artifacts/test/task-03/",
                     "artifacts/test/task-04/",
                     "artifacts/test/task-05/",
@@ -2427,6 +2447,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-11/",
                     "artifacts/test/task-13/",
                     "artifacts/test/task-15/",
+                    "artifacts/test/task-16/",
                 ],
             },
         },
@@ -2437,9 +2458,11 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         "claim": (
             "WhatsApp ingress + memory R/W + transcription + reminders/habits + "
             "E2E-01 voice reminder + E2E-03 todo sync + E2E-04 calendar soft "
-            "confirm gates: allowlisted DM; voice→transcript/clarify; Auto "
-            "reminder/todo create; Android projection equality; calendar "
-            "soft-confirm (INV-APPR-003); fail-closed on broken INV"
+            "confirm + E2E-05 diet → groceries gates: allowlisted DM; "
+            "voice→transcript/clarify; Auto reminder/todo create; Android "
+            "projection equality; calendar soft-confirm (INV-APPR-003); diet "
+            "plan with banned-ingredient absence + grocery todos; fail-closed "
+            "on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -2453,6 +2476,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/e2e-01/verification.json",
             "artifacts/test/e2e-03/verification.json",
             "artifacts/test/e2e-04/verification.json",
+            "artifacts/test/e2e-05/verification.json",
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
             "artifacts/test/task-05/verification.json",
@@ -2463,6 +2487,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-11/verification.json",
             "artifacts/test/task-13/verification.json",
             "artifacts/test/task-15/verification.json",
+            "artifacts/test/task-16/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -2470,7 +2495,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             if L["layer"] == "contract"
             for c in L.get("checks", [])
         ],
-        "gate_e2e": ["E2E-01", "E2E-03", "E2E-04"],
+        "gate_e2e": ["E2E-01", "E2E-03", "E2E-04", "E2E-05"],
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",
@@ -3493,6 +3518,113 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-15/grocery-todos.json",
                         "artifacts/test/task-15/outbound-messages.json",
                         "artifacts/test/e2e-05-structure/verification.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-16 E2E-05 diet → groceries gate.
+    # Fail-closed must not stomp happy-path task-16 verification.
+    e2e05_checks = [
+        c
+        for L in layers
+        if L["layer"] == "e2e"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("e2e-05.")
+    ]
+    task16_pass = (
+        all(c.get("result") == "PASS" for c in e2e05_checks if c.get("gate", True))
+        if e2e05_checks
+        else False
+    )
+    if not broken:
+        task16 = ROOT / "artifacts" / "test" / "task-16"
+        task16.mkdir(parents=True, exist_ok=True)
+        journey05 = run_e2e_05(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "e2e-05",
+            write_artifacts=True,
+        )
+        demo_vu = VirtualUser.bootstrap(root=ROOT)
+        demo_turn = demo_vu.inject_text(EXPECTED_E2E05_UTTERANCE)
+        demo_plan = demo_vu.last_plan_meals
+        (task16 / "meal-plan.json").write_text(
+            json.dumps(
+                demo_plan.plan.to_dict() if demo_plan and demo_plan.plan else {},
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (task16 / "grocery-todos.json").write_text(
+            json.dumps(demo_vu.todo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        demo_vu.catcher.write_json(task16 / "outbound-messages.json")
+        write_report(
+            task16,
+            layer="task-16",
+            result="PASS" if task16_pass else "FAIL",
+            checks=e2e05_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-05",
+                "gate": True,
+                "eval_lane_blocking": False,
+                "nl_tools": getattr(demo_turn, "tool_calls", None),
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-05",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-16/",
+                },
+            },
+        )
+        (task16 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-05 diet → groceries: seed memory with dislikes/allergies → "
+                        "'Plan meals for tomorrow.' → structured plan + grocery todos; "
+                        "banned ingredients absent; T3 exit for diet path"
+                    ),
+                    "result": "PASS" if task16_pass and journey05.ok else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-05",
+                    "gate": True,
+                    "t3_exit": task16_pass and journey05.ok,
+                    "eval_lane_blocking": False,
+                    "eval_score": journey05.eval_score,
+                    "grocery_todo_count": journey05.grocery_todo_count,
+                    "e2e_checks": [c.get("id") for c in e2e05_checks],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-03",
+                        "make e2e-04",
+                        "make e2e-05",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-16/report.json",
+                        "artifacts/test/task-16/verification.json",
+                        "artifacts/test/task-16/meal-plan.json",
+                        "artifacts/test/task-16/grocery-todos.json",
+                        "artifacts/test/task-16/outbound-messages.json",
+                        "artifacts/test/e2e-05/verification.json",
                     ],
                 },
                 indent=2,
