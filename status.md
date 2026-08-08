@@ -211,11 +211,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-04, TASK-13, TASK-10
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Diet plan from memory + schedule; grocery todos; constraint checks. Eval lane non-blocking. Per `capabilities/diet-and-planning.md`.
 - **Acceptance:** E2E-05 structure checks green; eval optional.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — `make test-ci` exit 0; `make test-ci-fail-closed` exit 0; `make e2e-01/03/04` exit 0. Spot-checks: seed profile allergies/dislikes/low-carb → `Plan meals for tomorrow.` Auto `diet_draft` + grocery `todo_add` tags; banned terms (peanuts, shellfish, cilantro, rice) absent from plan + todos; late-night calendar → quick dinner; eval lane score recorded (non-blocking). **E2E-05 structure ready** for TASK-16 gate.
+- **Artifacts:** `src/capabilities/diet/{parse,constraints,planner,store,service,eval}.py`, `src/harness/virtual_user.py` (`run_e2e_05_structure`, NL `diet_draft` routing), `scripts/run_test_ci.py`, `artifacts/test/task-15/` (runtime; gitignored), `artifacts/test/e2e-05-structure/` (runtime; gitignored)
 
 ### TASK-16 — E2E-05 Diet → groceries
 - **Phase:** 3 / T3
@@ -389,6 +389,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:00 | TASK-14 | Agent A | composer-2.5 | implement | E2E-04 gate + test:ci e2e layer; status → review |
 | 2026-08-08 23:05 | TASK-14 | Agent B | composer-2.5 | review | PASS — e2e-04/e2e-01/e2e-03/test-ci/fail-closed exit 0; gate:true + accept/deny create counts; status → done |
 | 2026-08-08 23:06 | TASK-15 | subagent-A | composer-2.5 | implement | Diet planning v1 + grocery todos from memory |
+| 2026-08-08 23:12 | TASK-15 | Agent A | composer-2.5 | implement | Diet v1 complete — constraints + grocery todos + E2E-05 structure; status → review |
 
 ---
 
@@ -411,5 +412,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-15 diet & planning v1.  
-**Next:** TASK-15 Agent A implement, then Agent B review.
+**Now:** TASK-15 Agent B review.  
+**Next:** TASK-16 E2E-05 gate (after TASK-15 review).
