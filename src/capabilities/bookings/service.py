@@ -15,6 +15,7 @@ from harness.clock import FakeClock
 from harness.outbound import OutboundMessageCatcher
 from policy.action_gateway import ActionGateway, ProposeResult
 from policy.approvals import ApprovalTier, tier_for
+from policy.injection_guard import is_auto_approve_injection, strip_for_display
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PORTAL_FIXTURE = ROOT / "fixtures" / "browser" / "booksy-stub-slots.json"
@@ -163,6 +164,8 @@ class BookingService:
     ) -> ProposeBookingResult:
         tier = tier_for("book")
         card = self.portal.shop_card()
+        page_body = str(card.get("page_body") or self.portal.page_body())
+        untrusted_injection = is_auto_approve_injection(page_body)
         raw_slots = self.portal.list_slots(
             window_start=parsed.window_start,
             window_end=parsed.window_end,
@@ -239,6 +242,8 @@ class BookingService:
             "timezone": parsed.timezone,
             "recipient": recipient,
             "calendar_title": f"{parsed.service or card['service']} @ {card['shop']}",
+            "untrusted_page_text": strip_for_display(page_body),
+            "page_injection_detected": untrusted_injection,
         }
 
         summary = (

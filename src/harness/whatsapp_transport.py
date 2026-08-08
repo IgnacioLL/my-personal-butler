@@ -168,9 +168,36 @@ class MockWhatsAppTransport:
         self.last_turn_body: str | None = None
         self.last_stt_outcome: str | None = None
         self.last_tts_spoken: bool = False
+        self._seen_message_ids: set[str] = set()
 
     def inject(self, msg: InboundWhatsAppMessage) -> TransportTurnResult:
         """Inject one inbound WhatsApp event through allowlist → STT (if audio) → agent."""
+        if msg.message_id:
+            if msg.message_id in self._seen_message_ids:
+                decision = evaluate_ingress(
+                    msg.sender,
+                    self.allowlist,
+                    is_group=msg.is_group,
+                    groups_enabled=self.groups_enabled,
+                    group_id=msg.group_id,
+                    broken_allow_all=self.broken_allow_all,
+                )
+                return TransportTurnResult(
+                    allowed=decision.allowed,
+                    reason="duplicate_webhook",
+                    decision=decision,
+                    tool_calls=[],
+                    outbound_count=0,
+                    counters_delta={},
+                    transcript=None,
+                    clarification=None,
+                    turn_body=None,
+                    stt_outcome=None,
+                    tts_spoken=False,
+                    inbound=msg,
+                )
+            self._seen_message_ids.add(msg.message_id)
+
         self.inbound_log.append(msg)
 
         working = msg
@@ -401,6 +428,7 @@ class MockWhatsAppTransport:
         self.last_tts_spoken = False
         self.pipeline.tts.reset()
         self.pipeline.stt.calls.clear()
+        self._seen_message_ids.clear()
 
 
 def _delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:

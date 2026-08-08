@@ -270,6 +270,23 @@ class E2E09Result:
 
 
 @dataclass
+class E2E10Result:
+    """Machine-check result for E2E-10 restart mid-flight durability."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    approval_id: Optional[str]
+    buy_count_after_accept: int
+    buy_count_after_duplicate_execute: int
+    pending_after_restart: int
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
 class T2ApprovalInboxResult:
     """Machine-check result for T2 Android approval inbox (Accept/Deny alone)."""
 
@@ -331,6 +348,9 @@ class VirtualUser:
         owner: str = "+15550001111",
         monday_local: datetime | None = None,
         timezone: str | None = None,
+        data_root: Path | str | None = None,
+        approvals_path: Path | str | None = None,
+        clock: FakeClock | None = None,
     ) -> "VirtualUser":
         """Seed timezone from memory fixture; fake clock Monday 10:00 local (E2E-01)."""
         repo = root or ROOT
@@ -342,12 +362,28 @@ class VirtualUser:
         tz = ZoneInfo(tz_name)
         start = monday_local or datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
 
-        clock = FakeClock(start=start)
+        clock = clock or FakeClock(start=start)
         catcher = OutboundMessageCatcher()
         store = ReminderStore()
         todo_store = TodoStore()
         calendar_store = CalendarStore()
-        gateway = ActionGateway(clock=clock, reminders=store, todos=todo_store)
+
+        durable_approvals: Path | None = None
+        if approvals_path is not None:
+            durable_approvals = Path(approvals_path)
+            durable_approvals.parent.mkdir(parents=True, exist_ok=True)
+        elif data_root is not None:
+            durable_root = Path(data_root)
+            durable_root.mkdir(parents=True, exist_ok=True)
+            durable_approvals = durable_root / "approvals" / "items.json"
+            durable_approvals.parent.mkdir(parents=True, exist_ok=True)
+
+        gateway = ActionGateway(
+            clock=clock,
+            reminders=store,
+            todos=todo_store,
+            approvals_path=durable_approvals,
+        )
         gateway.calendar.attach_store(calendar_store)
         reminders = ReminderService(
             store=store,
@@ -3890,6 +3926,219 @@ def run_e2e_09(
                     "approval_id": proposed.approval_id,
                     "status": expired_item.status.value if expired_item else None,
                     "book_count": vu.book_count(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    return result
+
+
+def run_e2e_10(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E10Result:
+    """E2E-10 — Restart mid-flight durability (gate-tagged; T8).
+
+    Spec (agent-plan/testing/e2e-flows.md):
+      1. Create pending purchase approval.
+      2. Restart harness Gateway (new process, same disk approvals).
+      3. Pending approval still visible; Accept still works once.
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-10")
+    data_root = out / ".gateway-data"
+    checks: list[dict[str, Any]] = []
+    utterance = EXPECTED_E2E07_UTTERANCE
+
+    vu1 = VirtualUser.bootstrap(root=repo, data_root=data_root)
+    turn = vu1.inject_text(utterance)
+    proposed = vu1.last_shopping_propose
+    approval_id = proposed.approval_id if proposed else None
+    propose_ok = (
+        turn.allowed
+        and "buy_propose" in turn.tool_calls
+        and proposed is not None
+        and proposed.ok
+        and not proposed.executed
+        and proposed.tier == ApprovalTier.HARD_APPROVE.value
+        and approval_id is not None
+        and vu1.buy_count() == 0
+        and len(vu1.list_android_approvals()) == 1
+    )
+    checks.append(
+        {
+            "id": "e2e-10.pending_purchase_before_restart",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} approval_id={approval_id} "
+                f"buy={vu1.buy_count()} pending={len(vu1.list_android_approvals())}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # Simulate Gateway restart — new VirtualUser handle, same durable approvals + clock.
+    vu2 = VirtualUser.bootstrap(root=repo, data_root=data_root, clock=vu1.clock)
+    pending_after = vu2.list_android_approvals()
+    reopened = vu2.gateway.approvals.get(approval_id or "")
+    restart_ok = (
+        approval_id is not None
+        and len(pending_after) == 1
+        and pending_after[0].id == approval_id
+        and pending_after[0].status == ApprovalStatus.PENDING.value
+        and reopened is not None
+        and reopened.status == ApprovalStatus.PENDING
+        and vu2.buy_count() == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-10.pending_survives_restart",
+            "result": "PASS" if restart_ok else "FAIL",
+            "detail": (
+                f"approval_id={approval_id} pending={len(pending_after)} "
+                f"status={reopened.status.value if reopened else None} buy={vu2.buy_count()}"
+            ),
+            "gate": True,
+        }
+    )
+
+    accepted = vu2.accept_approval(approval_id or "") if approval_id else None
+    buy_after_accept = vu2.buy_count()
+    dup_exec = vu2.gateway.execute(approval_id or "") if approval_id else None
+    buy_after_dup = vu2.buy_count()
+    final_item = vu2.gateway.approvals.get(approval_id or "")
+    accept_once_ok = (
+        accepted is not None
+        and accepted.ok
+        and accepted.approval.status == ApprovalStatus.EXECUTED.value
+        and buy_after_accept == 1
+        and dup_exec is not None
+        and (not dup_exec.ok)
+        and buy_after_dup == 1
+        and final_item is not None
+        and final_item.status == ApprovalStatus.EXECUTED
+        and len(vu2.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-10.accept_once_no_duplicate_execute",
+            "result": "PASS" if accept_once_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} buy={buy_after_accept} "
+                f"dup_exec={getattr(dup_exec, 'reason', None)} buy_dup={buy_after_dup} "
+                f"status={final_item.status.value if final_item else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = E2E10Result(
+        result=overall,
+        checks=checks,
+        approval_id=approval_id,
+        buy_count_after_accept=buy_after_accept,
+        buy_count_after_duplicate_execute=buy_after_dup,
+        pending_after_restart=len(pending_after),
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        vu2.catcher.write_json(out / "outbound-messages.json")
+        (out / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "approval_id": approval_id,
+                    "before_restart": vu1.android_inbox.snapshot(),
+                    "after_restart": vu2.android_inbox.snapshot(),
+                    "final": final_item.to_dict() if final_item else None,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "purchases.json").write_text(
+            json.dumps(
+                {
+                    "buy_count_after_accept": buy_after_accept,
+                    "buy_count_after_duplicate_execute": buy_after_dup,
+                    "duplicate_execute_reason": getattr(dup_exec, "reason", None),
+                    "tasks": vu2.purchase_store.to_dict(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            out,
+            layer="e2e-10",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-10",
+                "gate": True,
+                "utterance": utterance,
+                "approval_id": approval_id,
+                "buy_count_after_accept": buy_after_accept,
+                "pending_after_restart": len(pending_after),
+                "t8_exit": overall == "PASS",
+                "harness": "VirtualUser",
+                "data_root": str(data_root),
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-10",
+                        "python3 scripts/run_e2e_10.py",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/e2e-10/",
+                },
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-10 restart mid-flight: pending purchase approval survives "
+                        "harness Gateway restart; Android inbox still shows pending; "
+                        "Accept executes once; duplicate execute blocked (T8 exit)"
+                    ),
+                    "result": overall,
+                    "flow": "E2E-10",
+                    "gate": True,
+                    "t8_exit": overall == "PASS",
+                    "checks": [c["id"] for c in checks],
+                    "commands": [
+                        "python3 scripts/run_e2e_10.py",
+                        "make e2e-10",
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/e2e-10/report.json",
+                        "artifacts/test/e2e-10/verification.json",
+                        "artifacts/test/e2e-10/approvals.json",
+                        "artifacts/test/e2e-10/purchases.json",
+                        "artifacts/test/e2e-10/outbound-messages.json",
+                    ],
+                    "approval_id": approval_id,
+                    "buy_count_after_accept": buy_after_accept,
+                    "buy_count_after_duplicate_execute": buy_after_dup,
                 },
                 indent=2,
                 sort_keys=True,

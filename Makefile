@@ -1,4 +1,4 @@
-.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-02 e2e-03 e2e-04 e2e-05 e2e-06 e2e-07 e2e-08 e2e-09 help
+.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-02 e2e-03 e2e-04 e2e-05 e2e-06 e2e-07 e2e-08 e2e-09 e2e-10 soak-chaos help
 
 help:
 	@echo "Targets:"
@@ -13,6 +13,8 @@ help:
 	@echo "  e2e-07               Run E2E-07 Shopping with cap / freeze (+ deny; T6)"
 	@echo "  e2e-08               Run E2E-08 Self-mod patch accept + deny (T7)"
 	@echo "  e2e-09               Run E2E-09 Ignored hard approval expiry"
+	@echo "  e2e-10               Run E2E-10 Restart mid-flight durability (T8)"
+	@echo "  soak-chaos           Run nightly soak/chaos pack (restart, dup webhook, clock)"
 	@echo "  test                 Alias for test-ci"
 
 test-ci:
@@ -55,5 +57,11 @@ e2e-08:
 
 e2e-09:
 	@PYTHONPATH=src python3 ./scripts/run_e2e_09.py
+
+e2e-10:
+	@PYTHONPATH=src python3 ./scripts/run_e2e_10.py
+
+soak-chaos:
+	@PYTHONPATH=src python3 ./scripts/run_soak_chaos.py
 
 test: test-ci

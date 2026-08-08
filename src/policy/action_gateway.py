@@ -533,12 +533,16 @@ class ActionGateway:
 
         task_id = resolved.get("purchase_task_id")
         if self.shopping is not None and task_id:
-            self.shopping.mark_purchased(
-                str(task_id),
-                receipt_id=str(receipt.get("receipt_id")),
-                at=self.clock.now(),
-                receipt=receipt,
-            )
+            try:
+                self.shopping.mark_purchased(
+                    str(task_id),
+                    receipt_id=str(receipt.get("receipt_id")),
+                    at=self.clock.now(),
+                    receipt=receipt,
+                )
+            except KeyError:
+                # Harness restart may reopen approvals without in-memory purchase ledger.
+                pass
 
         if self.outbound is not None:
             price = resolved.get("price")

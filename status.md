@@ -35,7 +35,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | Fake clock utility | done | `src/harness/clock.py` — `now()` / `advance(duration)` |
 | INV-* runner skeleton | done | `src/harness/inv_runner.py` + `src/invariants/` |
 | Virtual User harness | done | `src/harness/virtual_user.py` — inject audio/text, create reminders, assert state (E2E-01 gate) |
-| Phase exits require matching T* unlock | done | **T7 exit PASS** (TASK-23+24): sample workspace fixtures + E2E-08 + INV-SELF-* + policy-change subtype; **T8 next** (TASK-25) |
+| Phase exits require matching T* unlock | done | **T8 exit PASS** (TASK-25): heartbeat/quiet policies + soak/chaos + E2E-10 + injection hardening; TASK-26 CI wiring next |
 
 ---
 
@@ -321,11 +321,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-08, TASK-12, TASK-14, TASK-22, TASK-24
 - **Model:** composer-2.5 (impl) + cursor-grok-4.5-high (soak/safety review)
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Morning brief / quiet policies; soak/chaos pack; restart durability E2E-10; harden injection defenses per Phase 8 roadmap.
 - **Acceptance:** T8 exit criteria; nightly-oriented packs documented.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Agent A implement — `make test-ci` + `make test-ci-fail-closed` PASS; heartbeat morning brief + weekly review stubs respect `pause_agent` + quiet hours; soak/chaos (restart mid-approval, clock jump, duplicate webhook/message_id) in integration + `make soak-chaos`; E2E-10 gate green (pending buy → restart → Accept once); injection flagged on stub portal without bypassing Accept; INV-* intact.
+- **Artifacts:** `src/operations/heartbeat.py`, `src/policy/{quiet_hours,injection_guard}.py`, `scripts/{run_e2e_10,run_soak_chaos}.py`, `Makefile` (`e2e-10`, `soak-chaos`), `artifacts/test/task-25/`, `artifacts/test/e2e-10/`
 
 ### TASK-26 — CI gates wiring & component-matrix mapping
 - **Phase:** continuous (land early, tighten each phase)
@@ -418,6 +418,8 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 02:10 | TASK-24 | subagent-A | cursor-grok-4.5-high | implement | E2E-08 self-mod accept+deny gate |
 | 2026-08-09 02:30 | TASK-24 | Agent A | cursor-grok-4.5-high | implement | E2E-08 gate + test:ci; T7 exit ready; status → review |
 | 2026-08-08 23:44 | TASK-24 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-08/test-ci/fail-closed/sample e2e exit 0; accept-once/deny/INV-SELF spot-checks; T7 exit; status → done |
+| 2026-08-09 02:25 | TASK-25 | subagent-A | composer-2.5 | implement | Polish: heartbeat, soak, E2E-10 durability |
+| 2026-08-08 23:50 | TASK-25 | Agent A | composer-2.5 | implement | T8 polish complete — heartbeat/soak/E2E-10; status → review |
 
 ---
 
@@ -440,5 +442,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-25 polish (heartbeat/weekly/soak/E2E-10) + TASK-26 CI.  
-**Next:** T8 exit after TASK-25.
+**Now:** TASK-25 review (Agent B) + TASK-26 CI wiring.  
+**Next:** T8 exit sign-off after TASK-25 review.
