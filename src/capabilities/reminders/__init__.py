@@ -26,5 +26,5 @@ __all__ = [
     "parse_reminder",
 ]
 
-# ReminderService imports ActionGateway — import from
-# capabilities.reminders.service directly to avoid circular imports with policy.
+# ReminderService / EscalationLadder import ActionGateway or voice doubles —
+# import those modules directly to avoid circular imports with policy.

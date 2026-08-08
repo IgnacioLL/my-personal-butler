@@ -1,16 +1,7 @@
-"""Android companion node doubles — projection API for todos + approvals."""
+"""Android companion node doubles — import submodules directly.
 
-from channels.android.approvals import (
-    AcceptResult,
-    AndroidApprovalInboxApi,
-    ApprovalProjection,
-)
-from channels.android.projection import AndroidProjectionApi, TodoProjection
-
-__all__ = [
-    "AcceptResult",
-    "AndroidApprovalInboxApi",
-    "AndroidProjectionApi",
-    "ApprovalProjection",
-    "TodoProjection",
-]
+Use:
+  channels.android.projection
+  channels.android.approvals
+  channels.android.notifications
+"""

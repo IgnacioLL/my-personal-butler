@@ -233,11 +233,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-07, TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Mock voice provider; call tool allowlist (`INV-APPR-005`); after-call WhatsApp summary. Per `channels/voice-calls.md`.
 - **Acceptance:** Mock call tests + allowlist invariant.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Implement complete (Agent A) — MockVoiceProvider places calls + records tool invocations; `INV-APPR-005` blocks buy/book/self_mod_apply mid-call (read-only allowlist); after-call WhatsApp summary queued; EscalationLadder hooks WhatsApp → Android → call (E2E-02 ready). Awaiting Agent B review.
+- **Artifacts:** `src/channels/voice/{allowlist,provider}.py`, `src/channels/android/notifications.py`, `src/capabilities/reminders/{escalation,scheduler}.py`, `src/invariants/inv_appr_005.py`, `scripts/run_test_ci.py`, `artifacts/test/task-17/`
 
 ### TASK-18 — E2E-02 Habit escalation ladder
 - **Phase:** 4 / T4
@@ -395,6 +395,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:55 | TASK-16 | Agent A | composer-2.5 | implement | E2E-05 gate + test:ci e2e layer; T3 exit ready; status → review |
 | 2026-08-08 23:58 | TASK-16 | Agent B | composer-2.5 | review | PASS — e2e-05/test-ci/fail-closed/e2e-01/03/04 exit 0; gate:true + banned-absent spot-checks; T3 exit; status → done |
 | 2026-08-09 00:00 | TASK-17 | subagent-A | cursor-grok-4.5-high | implement | Mock voice calls + INV-APPR-005 + escalation |
+| 2026-08-09 00:15 | TASK-17 | Agent A | cursor-grok-4.5-high | implement | Mock voice + INV-APPR-005 + ladder; status → review |
 
 ---
 
@@ -417,5 +418,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-16 done (E2E-05 gate; T3 exit).  
-**Next:** Phase 4 (TASK-17).
+**Now:** TASK-17 in review (mock voice + INV-APPR-005 + escalation ladder).  
+**Next:** Agent B review → TASK-18 (E2E-02).

@@ -77,7 +77,16 @@ from capabilities.todos.parse import looks_like_todo_add, parse_todo  # noqa: E4
 from capabilities.todos.service import TodoService  # noqa: E402
 from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normalize_title  # noqa: E402
 from channels.android.approvals import AndroidApprovalInboxApi  # noqa: E402
+from channels.android.notifications import AndroidNotificationCatcher  # noqa: E402
 from channels.android.projection import AndroidProjectionApi  # noqa: E402
+from channels.voice.allowlist import (  # noqa: E402
+    CALL_MODE_ALLOWED_TOOLS,
+    CALL_MODE_FORBIDDEN_TOOLS,
+    call_mode_block_reason,
+    is_call_mode_allowed,
+)
+from channels.voice.provider import MockVoiceProvider  # noqa: E402
+from capabilities.reminders.escalation import EscalationLadder  # noqa: E402
 
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
@@ -260,6 +269,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_transcription_unit_checks(ROOT))
     checks.extend(_run_models_unit_checks(ROOT))
     checks.extend(_run_reminder_unit_checks())
+    checks.extend(_run_voice_unit_checks())
     checks.extend(_run_todo_unit_checks())
     checks.extend(_run_android_approval_unit_checks())
     checks.extend(_run_calendar_unit_checks(ROOT))
@@ -494,6 +504,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_transcription_integration_checks(ROOT))
     checks.extend(_run_models_integration_checks(ROOT))
     checks.extend(_run_reminder_integration_checks(ROOT))
+    checks.extend(_run_voice_integration_checks(ROOT))
     checks.extend(_run_todo_integration_checks(ROOT))
     checks.extend(_run_android_approval_integration_checks(ROOT))
     checks.extend(_run_calendar_integration_checks(ROOT))
@@ -1140,6 +1151,259 @@ def _run_reminder_integration_checks(root: Path) -> list[dict[str, Any]]:
             "id": "integration.reminder.snooze_then_fire",
             "result": "PASS" if snooze_fire_ok else "FAIL",
             "detail": f"early={len(early)} later={len(later)}",
+        }
+    )
+    return checks
+
+
+def _run_voice_unit_checks() -> list[dict[str, Any]]:
+    """Mock voice provider: place call, tool allowlist, after-call summary."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+
+    allow_ok = (
+        is_call_mode_allowed("calendar_read")
+        and is_call_mode_allowed("todo_read")
+        and not is_call_mode_allowed("buy")
+        and not is_call_mode_allowed("book")
+        and not is_call_mode_allowed("self_mod_apply")
+        and call_mode_block_reason("buy") == "call_mode_forbidden_hard_action"
+        and call_mode_block_reason("calendar_create") == "call_mode_tool_not_allowlisted"
+        and call_mode_block_reason("calendar_read") is None
+        and CALL_MODE_FORBIDDEN_TOOLS == frozenset({"buy", "book", "self_mod_apply"})
+        and "calendar_read" in CALL_MODE_ALLOWED_TOOLS
+    )
+    checks.append(
+        {
+            "id": "unit.voice.call_mode_allowlist",
+            "result": "PASS" if allow_ok else "FAIL",
+            "detail": (
+                f"allowed={sorted(CALL_MODE_ALLOWED_TOOLS)} "
+                f"forbidden={sorted(CALL_MODE_FORBIDDEN_TOOLS)}"
+            ),
+        }
+    )
+
+    clock = FakeClock()
+    catcher = OutboundMessageCatcher()
+    voice = MockVoiceProvider(catcher, clock, default_to=owner)
+    session = voice.place_call(script="Calling about: stretch", reminder_id="r1")
+    read = voice.invoke_tool(session.id, "memory_read", {"key": "prefs"})
+    buy = voice.invoke_tool(session.id, "buy", {"sku": "x"})
+    book = voice.invoke_tool(session.id, "book", {"shop": "y"})
+    apply = voice.invoke_tool(session.id, "self_mod_apply", {"path": "z"})
+    ended = voice.end_call(session.id, outcome="done")
+    summaries = [
+        m for m in catcher.messages if m.meta.get("kind") == "after_call_summary"
+    ]
+    call_msgs = [m for m in catcher.messages if m.meta.get("kind") == "outbound_call"]
+    provider_ok = (
+        session.status == "ended"
+        and voice.call_count == 1
+        and read.ok
+        and (not buy.ok)
+        and (not book.ok)
+        and (not apply.ok)
+        and buy.reason == "call_mode_forbidden_hard_action"
+        and ended.summary_queued
+        and len(summaries) == 1
+        and summaries[0].channel == "whatsapp"
+        and len(call_msgs) == 1
+        and call_msgs[0].channel == "call"
+        and len(voice.forbidden_attempts()) == 3
+    )
+    checks.append(
+        {
+            "id": "unit.voice.mock_provider_place_and_tools",
+            "result": "PASS" if provider_ok else "FAIL",
+            "detail": (
+                f"call_count={voice.call_count} read_ok={read.ok} "
+                f"buy={buy.reason} summaries={len(summaries)} "
+                f"forbidden={len(voice.forbidden_attempts())}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_voice_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Escalation ladder WhatsApp → Android → call + after-call summary (E2E-02 prep)."""
+    _ = root
+    checks: list[dict[str, Any]] = []
+    tz_name = "Europe/Madrid"
+    tz = ZoneInfo(tz_name)
+    monday_local = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+    owner = "+15550001111"
+
+    clock = FakeClock(start=monday_local)
+    catcher = OutboundMessageCatcher()
+    store = ReminderStore()
+    gw = ActionGateway(clock=clock, reminders=store)
+    voice = MockVoiceProvider(catcher, clock, default_to=owner)
+    android = AndroidNotificationCatcher(clock, catcher, default_to=owner)
+    svc = ReminderService(
+        store=store,
+        clock=clock,
+        catcher=catcher,
+        gateway=gw,
+        timezone=tz_name,
+        recipient=owner,
+    )
+    created = svc.create_from_utterance(
+        "every Sunday at 18:00 remind me to stretch",
+        as_habit=True,
+        habit_priority="high",
+        escalation_enabled=True,
+    )
+    habit = created.habit
+    assert habit is not None and created.reminder is not None
+
+    sched = ReminderScheduler(
+        store,
+        clock,
+        catcher,
+        kill=gw.kill,
+        default_recipient=owner,
+        voice=voice,
+        android=android,
+    )
+
+    # Step 1 — WhatsApp
+    fires1 = sched.advance(created.reminder.due_at - clock.now())
+    habit1 = store.get_habit(habit.id)
+    step1_ok = (
+        created.ok
+        and len(fires1) == 1
+        and fires1[0].emitted
+        and fires1[0].channel == "whatsapp"
+        and any(m.body.startswith("Habit reminder:") for m in catcher.messages)
+        and habit1 is not None
+        and habit1.escalation_step == 1
+        and habit1.current_channel() is EscalationChannel.ANDROID
+        and voice.call_count == 0
+        and android.count() == 0
+    )
+    checks.append(
+        {
+            "id": "integration.voice.escalation_whatsapp_step",
+            "result": "PASS" if step1_ok else "FAIL",
+            "detail": (
+                f"channel={fires1[0].channel if fires1 else None} "
+                f"step={habit1.escalation_step if habit1 else None} "
+                f"calls={voice.call_count}"
+            ),
+        }
+    )
+
+    # Step 2 — Android (next weekly due)
+    rem_after_1 = store.get(created.reminder.id)
+    assert rem_after_1 is not None
+    fires2 = sched.advance(rem_after_1.due_at - clock.now())
+    habit2 = store.get_habit(habit.id)
+    step2_ok = (
+        len(fires2) == 1
+        and fires2[0].emitted
+        and fires2[0].channel == "android"
+        and fires2[0].notification_id is not None
+        and android.count() == 1
+        and any(m.channel == "android" for m in catcher.messages)
+        and habit2 is not None
+        and habit2.escalation_step == 2
+        and habit2.current_channel() is EscalationChannel.CALL
+        and voice.call_count == 0
+    )
+    checks.append(
+        {
+            "id": "integration.voice.escalation_android_step",
+            "result": "PASS" if step2_ok else "FAIL",
+            "detail": (
+                f"channel={fires2[0].channel if fires2 else None} "
+                f"android_nudge={android.count()} "
+                f"step={habit2.escalation_step if habit2 else None}"
+            ),
+        }
+    )
+
+    # Step 3 — Call + after-call WhatsApp summary
+    rem_after_2 = store.get(created.reminder.id)
+    assert rem_after_2 is not None
+    fires3 = sched.advance(rem_after_2.due_at - clock.now())
+    habit3 = store.get_habit(habit.id)
+    summaries = [
+        m
+        for m in catcher.messages
+        if m.meta.get("kind") == "after_call_summary" and m.channel == "whatsapp"
+    ]
+    call_msgs = [m for m in catcher.messages if m.channel == "call"]
+    step3_ok = (
+        len(fires3) == 1
+        and fires3[0].emitted
+        and fires3[0].channel == "call"
+        and fires3[0].call_id is not None
+        and fires3[0].summary_queued
+        and voice.call_count == 1
+        and voice.calls[0].status == "ended"
+        and voice.calls[0].summary_queued
+        and len(summaries) == 1
+        and len(call_msgs) == 1
+        and habit3 is not None
+        and habit3.current_channel() is EscalationChannel.CALL
+    )
+    checks.append(
+        {
+            "id": "integration.voice.escalation_call_and_summary",
+            "result": "PASS" if step3_ok else "FAIL",
+            "detail": (
+                f"channel={fires3[0].channel if fires3 else None} "
+                f"call_id={fires3[0].call_id if fires3 else None} "
+                f"summary_queued={fires3[0].summary_queued if fires3 else None} "
+                f"summaries={len(summaries)}"
+            ),
+        }
+    )
+
+    # Ordered channel touches for E2E-02 readiness.
+    touch_order = [f.channel for f in (fires1 + fires2 + fires3) if f.emitted]
+    order_ok = touch_order == ["whatsapp", "android", "call"]
+    checks.append(
+        {
+            "id": "integration.voice.escalation_ordered_touches",
+            "result": "PASS" if order_ok else "FAIL",
+            "detail": f"order={touch_order}",
+        }
+    )
+
+    # Mid-call hard tools blocked (INV-APPR-005 path via live session before end).
+    # Use a fresh active call to probe tools (prior call already ended).
+    live = voice.place_call(script="Calling about: probe", reminder_id="probe")
+    blocked = []
+    for tool in ("buy", "book", "self_mod_apply"):
+        res = voice.invoke_tool(live.id, tool, {"item": tool})
+        blocked.append(not res.ok and res.reason == "call_mode_forbidden_hard_action")
+    read_ok = voice.invoke_tool(live.id, "todo_read", {}).ok
+    voice.end_call(live.id, outcome="probe_done")
+    appr005_ok = all(blocked) and read_ok
+    checks.append(
+        {
+            "id": "integration.voice.call_mode_blocks_hard_tools",
+            "result": "PASS" if appr005_ok else "FAIL",
+            "detail": f"blocked={blocked} read_ok={read_ok}",
+        }
+    )
+
+    # EscalationLadder helper still exposes channel_touch_order for E2E-02.
+    ladder = EscalationLadder(
+        ReminderStore(),
+        FakeClock(start=monday_local),
+        OutboundMessageCatcher(),
+        default_recipient=owner,
+    )
+    ladder_ok = ladder.voice is not None and ladder.android is not None
+    checks.append(
+        {
+            "id": "integration.voice.escalation_ladder_scaffold",
+            "result": "PASS" if ladder_ok else "FAIL",
+            "detail": f"voice={type(ladder.voice).__name__} android={type(ladder.android).__name__}",
         }
     )
     return checks
@@ -2448,6 +2712,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-13/",
                     "artifacts/test/task-15/",
                     "artifacts/test/task-16/",
+                    "artifacts/test/task-17/",
                 ],
             },
         },
@@ -2458,11 +2723,13 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         "claim": (
             "WhatsApp ingress + memory R/W + transcription + reminders/habits + "
             "E2E-01 voice reminder + E2E-03 todo sync + E2E-04 calendar soft "
-            "confirm + E2E-05 diet → groceries gates: allowlisted DM; "
-            "voice→transcript/clarify; Auto reminder/todo create; Android "
-            "projection equality; calendar soft-confirm (INV-APPR-003); diet "
-            "plan with banned-ingredient absence + grocery todos; fail-closed "
-            "on broken INV"
+            "confirm + E2E-05 diet → groceries gates + TASK-17 outbound voice "
+            "calls (INV-APPR-005) + habit escalation ladder scaffolding: "
+            "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
+            "Android projection equality; calendar soft-confirm (INV-APPR-003); "
+            "diet plan with banned-ingredient absence + grocery todos; "
+            "call-mode blocks buy/book/self_mod_apply; after-call WhatsApp "
+            "summary; fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -2488,6 +2755,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-13/verification.json",
             "artifacts/test/task-15/verification.json",
             "artifacts/test/task-16/verification.json",
+            "artifacts/test/task-17/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -3625,6 +3893,178 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-16/grocery-todos.json",
                         "artifacts/test/task-16/outbound-messages.json",
                         "artifacts/test/e2e-05/verification.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-17 outbound voice calls + escalation ladder.
+    # Fail-closed must not stomp happy-path task-17 verification.
+    voice_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.voice.")
+    ]
+    voice_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.voice.")
+    ]
+    appr005 = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if c.get("id") == "INV-APPR-005"
+    ]
+    task17_checks = voice_unit + voice_integration + appr005
+    task17_pass = (
+        all(c.get("result") == "PASS" for c in task17_checks) if task17_checks else False
+    )
+    if not broken:
+        task17 = ROOT / "artifacts" / "test" / "task-17"
+        task17.mkdir(parents=True, exist_ok=True)
+        tz = ZoneInfo("Europe/Madrid")
+        monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+        demo_clock = FakeClock(start=monday)
+        demo_catcher = OutboundMessageCatcher()
+        demo_store = ReminderStore()
+        demo_gw = ActionGateway(clock=demo_clock, reminders=demo_store)
+        demo_voice = MockVoiceProvider(demo_catcher, demo_clock, default_to="+15550001111")
+        demo_android = AndroidNotificationCatcher(
+            demo_clock, demo_catcher, default_to="+15550001111"
+        )
+        demo_svc = ReminderService(
+            store=demo_store,
+            clock=demo_clock,
+            catcher=demo_catcher,
+            gateway=demo_gw,
+            timezone="Europe/Madrid",
+            recipient="+15550001111",
+        )
+        demo = demo_svc.create_from_utterance(
+            "every Sunday at 18:00 remind me to stretch",
+            as_habit=True,
+            habit_priority="high",
+            escalation_enabled=True,
+        )
+        demo_sched = ReminderScheduler(
+            demo_store,
+            demo_clock,
+            demo_catcher,
+            kill=demo_gw.kill,
+            default_recipient="+15550001111",
+            voice=demo_voice,
+            android=demo_android,
+        )
+        channel_touches: list[str] = []
+        if demo.reminder is not None and demo.habit is not None:
+            for _ in range(3):
+                rem = demo_store.get(demo.reminder.id)
+                if rem is None:
+                    break
+                fires = demo_sched.advance(rem.due_at - demo_clock.now())
+                for f in fires:
+                    if f.emitted:
+                        channel_touches.append(f.channel)
+        # Probe INV-APPR-005 on a fresh active call for artifact evidence.
+        probe = demo_voice.place_call(script="Calling about: allowlist probe")
+        probe_invocations = []
+        for tool in ("calendar_read", "buy", "book", "self_mod_apply"):
+            res = demo_voice.invoke_tool(probe.id, tool, {"item": tool})
+            probe_invocations.append(res.invocation.to_dict())
+        demo_voice.end_call(probe.id, outcome="task17_artifact")
+
+        (task17 / "calls.json").write_text(
+            json.dumps(demo_voice.snapshot(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (task17 / "android-notifications.json").write_text(
+            json.dumps({"notifications": demo_android.to_list()}, indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        demo_catcher.write_json(task17 / "outbound-messages.json")
+        (task17 / "escalation-touches.json").write_text(
+            json.dumps(
+                {
+                    "channel_touches": channel_touches,
+                    "expected": ["whatsapp", "android", "call"],
+                    "habit": demo.habit.to_dict() if demo.habit else None,
+                    "probe_invocations": probe_invocations,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            task17,
+            layer="task-17",
+            result="PASS" if task17_pass else "FAIL",
+            checks=task17_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-02",
+                "e2e02_ready": task17_pass and channel_touches == ["whatsapp", "android", "call"],
+                "channel_touches": channel_touches,
+                "call_count": demo_voice.call_count,
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-17/",
+                },
+            },
+        )
+        (task17 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "TASK-17 outbound voice calls: mock provider places call + "
+                        "records tool invocations; INV-APPR-005 blocks "
+                        "buy/book/self_mod_apply mid-call; after-call WhatsApp "
+                        "summary queued; habit escalation ladder "
+                        "WhatsApp→Android→call ready for E2E-02"
+                    ),
+                    "result": "PASS" if task17_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-02",
+                    "e2e02_ready": task17_pass
+                    and channel_touches == ["whatsapp", "android", "call"],
+                    "invariants": ["INV-APPR-005"],
+                    "unit_checks": [c.get("id") for c in voice_unit],
+                    "integration_checks": [c.get("id") for c in voice_integration],
+                    "channel_touches": channel_touches,
+                    "call_count": demo_voice.call_count,
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-03",
+                        "make e2e-04",
+                        "make e2e-05",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-17/report.json",
+                        "artifacts/test/task-17/verification.json",
+                        "artifacts/test/task-17/calls.json",
+                        "artifacts/test/task-17/outbound-messages.json",
+                        "artifacts/test/task-17/android-notifications.json",
+                        "artifacts/test/task-17/escalation-touches.json",
                     ],
                 },
                 indent=2,
