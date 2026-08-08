@@ -321,7 +321,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-08, TASK-12, TASK-14, TASK-22, TASK-24
 - **Model:** composer-2.5 (impl) + cursor-grok-4.5-high (soak/safety review)
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Morning brief / quiet policies; soak/chaos pack; restart durability E2E-10; harden injection defenses per Phase 8 roadmap.
 - **Acceptance:** T8 exit criteria; nightly-oriented packs documented.
 - **Result:** _(agent)_
