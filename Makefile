@@ -1,4 +1,4 @@
-.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-03 help
+.PHONY: test test-ci test-ci-fail-closed e2e-01 e2e-03 e2e-04 help
 
 help:
 	@echo "Targets:"
@@ -6,6 +6,7 @@ help:
 	@echo "  test-ci-fail-closed  Prove fail-closed: broken INV must exit non-zero"
 	@echo "  e2e-01               Run E2E-01 Virtual User voice reminder journey"
 	@echo "  e2e-03               Run E2E-03 Todo WhatsApp → Android journey"
+	@echo "  e2e-04               Run E2E-04 Calendar soft confirm journey"
 	@echo "  test                 Alias for test-ci"
 
 test-ci:
@@ -27,5 +28,8 @@ e2e-01:
 
 e2e-03:
 	@PYTHONPATH=src python3 ./scripts/run_e2e_03.py
+
+e2e-04:
+	@PYTHONPATH=src python3 ./scripts/run_e2e_04.py
 
 test: test-ci

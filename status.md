@@ -200,11 +200,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-13
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Accept and deny paths; create count assertions.
 - **Acceptance:** report.json PASS.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Implemented gate-tagged E2E-04 Virtual User journey: WhatsApp NL “Schedule focus block Friday 09:00–11:00.” → pending soft confirm with `create_count=0`; Accept creates one focus-block event; isolated Deny path leaves `create_count=0` and blocks late execute. Wired into `test:ci` e2e gate layer alongside E2E-01/03. `make e2e-04`, `make test-ci`, `make test-ci-fail-closed` exit 0; prior gates green. `gate: true` in `artifacts/test/e2e-04/report.json` + `verification.json`.
+- **Artifacts:** `src/harness/virtual_user.py` (`run_e2e_04`, `E2E04Result`), `scripts/run_e2e_04.py`, `Makefile` (`e2e-04`), `scripts/run_test_ci.py` (e2e layer), `scripts/test-ci.sh`, `scripts/README.md`, `artifacts/test/e2e-04/` (runtime; gitignored)
 
 ### TASK-15 — Diet & planning v1
 - **Phase:** 3 / T3
@@ -386,6 +386,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:45 | TASK-13 | Agent A | cursor-grok-4.5-high | implement | Calendar store + soft confirm NL path; status → review |
 | 2026-08-08 22:50 | TASK-13 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01/e2e-03 exit 0; create_count/Deny/conflict spot-checks; E2E-04 ready; status → done |
 | 2026-08-08 22:55 | TASK-14 | subagent-A | composer-2.5 | implement | E2E-04 gate calendar soft confirm accept/deny |
+| 2026-08-08 23:00 | TASK-14 | Agent A | composer-2.5 | implement | E2E-04 gate + test:ci e2e layer; status → review |
 
 ---
 
@@ -408,5 +409,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-14 in_progress (E2E-04).  
+**Now:** TASK-14 review (E2E-04 gate).  
 **Next:** TASK-14 Agent B, then TASK-15 diet.

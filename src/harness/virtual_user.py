@@ -50,6 +50,7 @@ _REMIND_INTENT = re.compile(
 
 EXPECTED_E2E03_UTTERANCE = "Add todo: buy oat milk."
 EXPECTED_E2E04_UTTERANCE = "Schedule focus block Friday 09:00–11:00."
+EXPECTED_E2E04_DENY_UTTERANCE = "Schedule dentist Saturday 15:00–16:00."
 
 EXPECTED_E2E01_TRANSCRIPT = "Remind me Sunday at 18:00 to call grandma."
 E2E01_AUDIO_FIXTURE = "fx-reminder"
@@ -88,6 +89,23 @@ class E2E03Result:
     todo_id: Optional[str]
     title: Optional[str]
     status: Optional[str]
+    artifacts_dir: str
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "PASS"
+
+
+@dataclass
+class E2E04Result:
+    """Machine-check result for E2E-04 calendar soft confirm journey."""
+
+    result: str
+    checks: list[dict[str, Any]]
+    accept_approval_id: Optional[str]
+    deny_approval_id: Optional[str]
+    calendar_create_after_accept: int
+    calendar_create_after_deny: int
     artifacts_dir: str
 
     @property
@@ -971,6 +989,267 @@ def run_e2e_03(
                         "artifacts/test/e2e-03/android-projection.json",
                     ],
                     "todo_id": agent_todo.id if agent_todo else None,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    return result
+
+
+def run_e2e_04(
+    *,
+    root: Path | None = None,
+    artifacts_dir: Path | None = None,
+    write_artifacts: bool = True,
+) -> E2E04Result:
+    """E2E-04 — Calendar soft confirm (gate-tagged).
+
+    Accept path:
+      1. Text: 'Schedule focus block Friday 09:00–11:00.'
+      2. Pending soft confirm; calendar adapter create_count = 0.
+      3. Accept → event created once.
+
+    Deny path (isolated Virtual User):
+      Propose another event → Deny → create_count stays 0; late execute blocked.
+    """
+    repo = root or ROOT
+    out = artifacts_dir or (repo / "artifacts" / "test" / "e2e-04")
+    checks: list[dict[str, Any]] = []
+    utterance = EXPECTED_E2E04_UTTERANCE
+    deny_utterance = EXPECTED_E2E04_DENY_UTTERANCE
+
+    # --- Accept path ---
+    vu = VirtualUser.bootstrap(root=repo)
+    turn = vu.inject_text(utterance)
+    proposed = vu.last_soft_confirm
+    calendar_propose = vu.last_calendar_propose
+
+    propose_ok = (
+        turn.allowed
+        and "calendar_propose" in turn.tool_calls
+        and proposed is not None
+        and proposed.ok
+        and not proposed.executed
+        and proposed.tier == ApprovalTier.SOFT_CONFIRM.value
+        and proposed.approval_id is not None
+        and vu.calendar_create_count() == 0
+        and calendar_propose is not None
+        and calendar_propose.parsed is not None
+        and calendar_propose.parsed.start.isoformat() == "2026-01-09T09:00:00+01:00"
+        and calendar_propose.parsed.end.isoformat() == "2026-01-09T11:00:00+01:00"
+    )
+    checks.append(
+        {
+            "id": "e2e-04.whatsapp_proposes_soft_confirm",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"tools={turn.tool_calls} ok={getattr(proposed, 'ok', None)} "
+                f"tier={getattr(proposed, 'tier', None)} create={vu.calendar_create_count()} "
+                f"start={calendar_propose.parsed.start.isoformat() if calendar_propose and calendar_propose.parsed else None}"
+            ),
+            "gate": True,
+        }
+    )
+
+    pending = vu.list_android_approvals()
+    pending_ok = (
+        len(pending) == 1
+        and proposed is not None
+        and proposed.approval_id is not None
+        and pending[0].id == proposed.approval_id
+        and pending[0].action_type == "calendar_create"
+        and pending[0].status == ApprovalStatus.PENDING.value
+        and vu.calendar_create_count() == 0
+        and len(vu.gateway.calendar.events) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-04.pending_soft_confirm_create_zero",
+            "result": "PASS" if pending_ok else "FAIL",
+            "detail": (
+                f"pending={len(pending)} create={vu.calendar_create_count()} "
+                f"events={len(vu.gateway.calendar.events)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    accepted = vu.accept_approval(proposed.approval_id) if proposed and proposed.approval_id else None
+    create_after_accept = vu.calendar_create_count()
+    events_after_accept = list(vu.gateway.calendar.events)
+    last_event = events_after_accept[0] if events_after_accept else {}
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and accepted.approval.status == ApprovalStatus.EXECUTED.value
+        and create_after_accept == 1
+        and len(events_after_accept) == 1
+        and last_event.get("title", "").lower() == "focus block"
+        and last_event.get("start") == "2026-01-09T09:00:00+01:00"
+        and len(vu.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-04.accept_creates_once",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} create={create_after_accept} "
+                f"events={len(events_after_accept)} title={last_event.get('title')!r}"
+            ),
+            "gate": True,
+        }
+    )
+
+    # --- Deny path (fresh Virtual User — no prior calendar writes) ---
+    vu_deny = VirtualUser.bootstrap(root=repo)
+    deny_turn = vu_deny.inject_text(deny_utterance)
+    denied_prop = vu_deny.last_soft_confirm
+    create_before_deny = vu_deny.calendar_create_count()
+    denied = (
+        vu_deny.deny_approval(denied_prop.approval_id)
+        if denied_prop and denied_prop.approval_id
+        else None
+    )
+    create_after_deny = vu_deny.calendar_create_count()
+    late_exec = (
+        vu_deny.gateway.execute(denied_prop.approval_id)
+        if denied_prop and denied_prop.approval_id
+        else None
+    )
+    deny_ok = (
+        deny_turn.allowed
+        and "calendar_propose" in deny_turn.tool_calls
+        and denied_prop is not None
+        and denied_prop.ok
+        and denied_prop.approval_id is not None
+        and create_before_deny == 0
+        and denied is not None
+        and denied.status == ApprovalStatus.DENIED.value
+        and create_after_deny == 0
+        and len(vu_deny.gateway.calendar.events) == 0
+        and late_exec is not None
+        and (not late_exec.ok)
+        and len(vu_deny.list_android_approvals()) == 0
+    )
+    checks.append(
+        {
+            "id": "e2e-04.deny_creates_nothing",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"deny_status={denied.status if denied else None} "
+                f"create_before={create_before_deny} create_after={create_after_deny} "
+                f"late={getattr(late_exec, 'reason', None)}"
+            ),
+            "gate": True,
+        }
+    )
+
+    overall = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
+    result = E2E04Result(
+        result=overall,
+        checks=checks,
+        accept_approval_id=proposed.approval_id if proposed else None,
+        deny_approval_id=denied_prop.approval_id if denied_prop else None,
+        calendar_create_after_accept=create_after_accept,
+        calendar_create_after_deny=create_after_deny,
+        artifacts_dir=str(out.relative_to(repo)) if out.is_relative_to(repo) else str(out),
+    )
+
+    if write_artifacts:
+        out.mkdir(parents=True, exist_ok=True)
+        vu.catcher.write_json(out / "outbound-messages.json")
+        (out / "calendar.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": {
+                        "create_count": create_after_accept,
+                        "events": events_after_accept,
+                    },
+                    "deny_path": {
+                        "create_count": create_after_deny,
+                        "events": list(vu_deny.gateway.calendar.events),
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (out / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": vu.android_inbox.snapshot(),
+                    "deny_path": vu_deny.android_inbox.snapshot(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            out,
+            layer="e2e-04",
+            result=overall,
+            checks=checks,
+            extra={
+                "flow": "E2E-04",
+                "gate": True,
+                "utterance": utterance,
+                "deny_utterance": deny_utterance,
+                "accept_approval_id": proposed.approval_id if proposed else None,
+                "deny_approval_id": denied_prop.approval_id if denied_prop else None,
+                "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-04",
+                        "python3 scripts/run_e2e_04.py",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/e2e-04/",
+                },
+            },
+        )
+        (out / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "E2E-04 calendar soft confirm: WhatsApp 'Schedule focus block "
+                        "Friday 09:00–11:00.' proposes pending soft confirm with "
+                        "create_count=0; Accept creates event once; Deny path creates "
+                        "nothing and late execute is blocked"
+                    ),
+                    "result": overall,
+                    "flow": "E2E-04",
+                    "gate": True,
+                    "checks": [c["id"] for c in checks],
+                    "commands": [
+                        "python3 scripts/run_e2e_04.py",
+                        "make e2e-04",
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/e2e-04/report.json",
+                        "artifacts/test/e2e-04/verification.json",
+                        "artifacts/test/e2e-04/calendar.json",
+                        "artifacts/test/e2e-04/approvals.json",
+                        "artifacts/test/e2e-04/outbound-messages.json",
+                    ],
+                    "accept_approval_id": proposed.approval_id if proposed else None,
+                    "deny_approval_id": denied_prop.approval_id if denied_prop else None,
+                    "calendar_create_after_accept": create_after_accept,
+                    "calendar_create_after_deny": create_after_deny,
                 },
                 indent=2,
                 sort_keys=True,
