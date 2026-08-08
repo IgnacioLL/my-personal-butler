@@ -79,7 +79,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-01
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Allowlisted DM only; groups off; non-allowlisted → no tools / no side effects. Contract tests `INV-INGRESS-001`, `INV-INGRESS-002`. Mock WhatsApp transport per harnesses doc.
 - **Acceptance:** T0 WhatsApp allowlist contract tests green; B adversarial cases.
 - **Result:** _(agent)_
@@ -373,5 +373,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-02 done.  
-**Next:** TASK-03 (WhatsApp ingress) / TASK-04 (memory) / TASK-05 (hosting skeleton).
+**Now:** TASK-03 in_progress (WhatsApp ingress).  
+**Next:** TASK-03 Agent B, then TASK-04 / TASK-05 / TASK-09.
