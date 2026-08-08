@@ -233,7 +233,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-07, TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Mock voice provider; call tool allowlist (`INV-APPR-005`); after-call WhatsApp summary. Per `channels/voice-calls.md`.
 - **Acceptance:** Mock call tests + allowlist invariant.
 - **Result:** _(agent)_
@@ -394,6 +394,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:16 | TASK-16 | subagent-A | composer-2.5 | implement | E2E-05 diet → groceries journey |
 | 2026-08-08 23:55 | TASK-16 | Agent A | composer-2.5 | implement | E2E-05 gate + test:ci e2e layer; T3 exit ready; status → review |
 | 2026-08-08 23:58 | TASK-16 | Agent B | composer-2.5 | review | PASS — e2e-05/test-ci/fail-closed/e2e-01/03/04 exit 0; gate:true + banned-absent spot-checks; T3 exit; status → done |
+| 2026-08-09 00:00 | TASK-17 | subagent-A | cursor-grok-4.5-high | implement | Mock voice calls + INV-APPR-005 + escalation |
 
 ---
 
