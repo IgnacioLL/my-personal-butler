@@ -332,7 +332,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-01
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Wire `testing/ci-gates.md` merge gate set; map new behavior into component-matrix; ensure gate-tagged e2e list expands as phases land.
 - **Acceptance:** Documented `test:ci` matches plan; B audits gaps.
 - **Result:** _(agent)_
@@ -421,6 +421,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 02:25 | TASK-25 | subagent-A | composer-2.5 | implement | Polish: heartbeat, soak, E2E-10 durability |
 | 2026-08-08 23:50 | TASK-25 | Agent A | composer-2.5 | implement | T8 polish complete — heartbeat/soak/E2E-10; status → review |
 | 2026-08-08 23:55 | TASK-25 | Agent B | cursor-grok-4.5-high | review | PASS — soak/e2e-10/spot-checks; CI t8_exit stamp fix; T8 exit; status → done |
+| 2026-08-09 02:40 | TASK-26 | subagent-A | composer-2.5 | implement | CI gates audit + component-matrix mapping docs |
 
 ---
 
