@@ -255,7 +255,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-11, TASK-13
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Booksy-class stub; propose slots; execute only after Accept; calendar writeback; `INV-BOOK-*`. Per `capabilities/bookings.md`.
 - **Acceptance:** Simulated book path + invariants.
 - **Result:** _(agent)_
@@ -400,6 +400,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:10 | TASK-18 | subagent-A | cursor-grok-4.5-high | implement | E2E-02 habit escalation ladder |
 | 2026-08-09 00:25 | TASK-18 | Agent A | cursor-grok-4.5-high | implement | E2E-02 gate + test:ci; T4 exit ready; status → review |
 | 2026-08-09 00:35 | TASK-18 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-02/test-ci/fail-closed/prior e2e exit 0; ordered touches + allowlist spot-checks; T4 exit; status → done |
+| 2026-08-09 00:40 | TASK-19 | subagent-A | cursor-grok-4.5-high | implement | Bookings stub portal + hard approve + INV-BOOK |
 
 ---
 
