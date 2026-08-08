@@ -167,11 +167,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-02, TASK-10
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Accept/Deny/Edit via same API Android uses; Virtual User can exercise alone (T2 exit). Soft-confirm calendar path hooks for E2E-04.
 - **Acceptance:** T2 exit criteria met.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Re-ran `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, `make e2e-01` exit 0. Android approval inbox API doubles: `list_pending` / Accept (accept+execute) / Deny / Edit. Virtual User alone Accept soft calendar → `create_count=1`; Deny → create stays prior; Edit then Accept applies patched payload; hard buy Deny → `buy_count=0`. Soft-confirm calendar hooks for E2E-04 (`propose_soft_calendar`). INV-* intact; fail-closed does not stomp task-11 verification. **T2 exit met** — Accept/Deny by Virtual User alone.
+- **Artifacts:** `src/channels/android/approvals.py`, `src/channels/android/projection.py`, `src/policy/{approvals,action_gateway}.py`, `src/harness/virtual_user.py` (`run_t2_approval_inbox`), `scripts/run_test_ci.py`, `artifacts/test/task-11/` (runtime; gitignored)
 
 ### TASK-12 — E2E-03 Todo WhatsApp → Android
 - **Phase:** 2 / T2
@@ -378,6 +378,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:40 | TASK-10 | Agent A | composer-2.5 | implement | Todo store + Android API doubles + E2E-03 prep; status → review |
 | 2026-08-08 22:42 | TASK-10 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed/e2e-01 exit 0; todo/Android/dedup spot-checks; dup run_e2e_03 fix; status → done |
 | 2026-08-08 22:43 | TASK-11 | subagent-A | cursor-grok-4.5-high | implement | Android approval inbox + Virtual User Accept/Deny |
+| 2026-08-08 22:36 | TASK-11 | Agent A | cursor-grok-4.5-high | implement | Android inbox + soft-confirm hooks; T2 exit; status → review |
 
 ---
 
@@ -399,5 +400,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-11 (Android approval inbox Virtual User wiring).  
-**Next:** TASK-11 Agent A, then TASK-12 (E2E-03 gate).
+**Now:** TASK-11 in review (Agent B).  
+**Next:** TASK-12 (E2E-03 gate) after TASK-11 done.
