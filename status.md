@@ -288,7 +288,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-21
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Full E2E-07 including deny path for merge gate.
 - **Acceptance:** T6 exit; gate deny path green.
 - **Result:** _(agent)_
