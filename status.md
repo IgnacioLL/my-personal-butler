@@ -189,7 +189,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** In-memory calendar; conflict-aware suggestions; soft confirm before write (`INV-APPR-003`). Per `capabilities/calendar.md`.
 - **Acceptance:** Integration + E2E-04 green.
 - **Result:** _(agent)_
@@ -382,6 +382,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:36 | TASK-11 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01 exit 0; Accept/Deny/Edit + create_count=0 spot-checks; T2 exit; status → done |
 | 2026-08-08 22:48 | TASK-12 | subagent-A | composer-2.5 | implement | E2E-03 gate-tagged todo WhatsApp → Android; status → review |
 | 2026-08-08 22:40 | TASK-12 | Agent B | composer-2.5 | review | PASS — e2e-03/e2e-01/test-ci/fail-closed exit 0; gate:true artifacts; T2 exit; status → done |
+| 2026-08-08 22:52 | TASK-13 | subagent-A | cursor-grok-4.5-high | implement | Calendar R/W + soft confirm + conflicts |
 
 ---
 
