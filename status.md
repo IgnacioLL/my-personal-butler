@@ -200,10 +200,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-13
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Accept and deny paths; create count assertions.
 - **Acceptance:** report.json PASS.
-- **Result:** Implemented gate-tagged E2E-04 Virtual User journey: WhatsApp NL “Schedule focus block Friday 09:00–11:00.” → pending soft confirm with `create_count=0`; Accept creates one focus-block event; isolated Deny path leaves `create_count=0` and blocks late execute. Wired into `test:ci` e2e gate layer alongside E2E-01/03. `make e2e-04`, `make test-ci`, `make test-ci-fail-closed` exit 0; prior gates green. `gate: true` in `artifacts/test/e2e-04/report.json` + `verification.json`.
+- **Result:** PASS (Agent B review) — Re-ran `make e2e-04` exit 0, `make e2e-01` exit 0, `make e2e-03` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0. Spot-checks: `gate: true` on report + verification; `calendar_create_after_accept=1`, `calendar_create_after_deny=0`; pending soft confirm `create=0` until Accept; Deny + late execute blocked. `INV-APPR-003` intact (no weaken). No code fixes required.
 - **Artifacts:** `src/harness/virtual_user.py` (`run_e2e_04`, `E2E04Result`), `scripts/run_e2e_04.py`, `Makefile` (`e2e-04`), `scripts/run_test_ci.py` (e2e layer), `scripts/test-ci.sh`, `scripts/README.md`, `artifacts/test/e2e-04/` (runtime; gitignored)
 
 ### TASK-15 — Diet & planning v1
@@ -387,6 +387,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:50 | TASK-13 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/e2e-01/e2e-03 exit 0; create_count/Deny/conflict spot-checks; E2E-04 ready; status → done |
 | 2026-08-08 22:55 | TASK-14 | subagent-A | composer-2.5 | implement | E2E-04 gate calendar soft confirm accept/deny |
 | 2026-08-08 23:00 | TASK-14 | Agent A | composer-2.5 | implement | E2E-04 gate + test:ci e2e layer; status → review |
+| 2026-08-08 23:05 | TASK-14 | Agent B | composer-2.5 | review | PASS — e2e-04/e2e-01/e2e-03/test-ci/fail-closed exit 0; gate:true + accept/deny create counts; status → done |
 
 ---
 
@@ -409,5 +410,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-14 review (E2E-04 gate).  
-**Next:** TASK-14 Agent B, then TASK-15 diet.
+**Now:** TASK-15 diet & planning v1.  
+**Next:** TASK-15 Agent A implement, then Agent B review.
