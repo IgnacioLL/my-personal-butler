@@ -359,6 +359,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:02 | TASK-04 | subagent-A | composer-2.5 | implement | Personal memory profile template + R/W integration |
 | 2026-08-08 22:05 | TASK-04 | Agent A | composer-2.5 | implement | Memory store + INV-MEM-001 + integration; status → review |
 | 2026-08-08 22:06 | TASK-04 | Agent B | composer-2.5 | review | PASS — re-ran test-ci + fail-closed; secrets/fixture/persistence spot-checks; status → done |
+| 2026-08-08 22:08 | TASK-05 | subagent-A | composer-2.5 | implement | Hosting/Gateway config + approval store reboot durability |
 
 ---
 
@@ -379,5 +380,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-04 done (memory R/W).  
-**Next:** TASK-05 / TASK-06 / TASK-07 (blocked on TASK-06) / TASK-09.
+**Now:** TASK-05 in_progress (hosting).  
+**Next:** TASK-05 Agent B, then TASK-06 transcription (Grok).

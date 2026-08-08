@@ -4,6 +4,7 @@
 | --- | --- |
 | [`test-ci.sh`](./test-ci.sh) | **`test:ci`** entrypoint — unit + contract/INV-* + integration |
 | [`run_test_ci.py`](./run_test_ci.py) | Layer runner (stdlib); writes `artifacts/test/ci/` |
+| [`backup-restore-placeholder.sh`](./backup-restore-placeholder.sh) | Documented backup/restore paths (no cloud in CI) |
 
 ```bash
 ./scripts/test-ci.sh                 # happy path — expect exit 0

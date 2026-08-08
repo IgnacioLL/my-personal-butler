@@ -9,5 +9,7 @@
 | `inv_runner.py` | Discover/run `src/invariants/*` |
 | `artifacts.py` | `report.json` / `report.md` writers |
 | `adapters.py` | Stub calendar/commerce/self-mod/cron counters |
+| `gateway_profile.py` | Harness JSON gateway profile + data paths |
+| `gateway_harness.py` | Gateway double with `restart()` for E2E-10 prep |
 
 Fail-closed proof: run CI with `--break-invariant` so `policy.ingress` allows everyone; `INV-INGRESS-001`/`002` must FAIL.

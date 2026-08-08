@@ -2,10 +2,26 @@
 # Copy to gateway.local.yaml and fill in channel tokens outside git.
 #
 # Docs: agent-plan/architecture.md, agent-plan/operations/hosting.md
+# Harness CI loads config/gateway.harness.json (stdlib JSON); this YAML is the
+# human-editable template for VPS / always-on deployment.
 
 gateway:
   name: personal-agent
   # session_policy: one primary personal DM session (see architecture.md)
+
+hosting:
+  # Recommended: small always-on VPS — see agent-plan/operations/hosting.md
+  mode: vps  # vps | home | harness
+  public_url: https://gateway.example.com
+  daemon:
+    enabled: true
+    unit: openclaw-gateway.service
+    restart: on-failure
+  whatsapp_reconnect: auto  # reconnect session after Gateway reboot
+  backup:
+    schedule_cron: "0 3 * * *"
+    manifest: ./config/backup.example.json
+    script: ./scripts/backup-restore-placeholder.sh
 
 channels:
   whatsapp:
@@ -29,7 +45,12 @@ cron:
 
 approvals:
   # Trust core hooks — see agent-plan/trust-and-safety/approval-matrix.md
-  store_path: ./data/approvals
+  store_path: ./data/approvals/items.json
 
 memory:
-  profile_path: ./data/memory/profile
+  profile_path: ./data/memory/profile.json
+  episodes_path: ./data/memory/episodes.jsonl
+
+data:
+  root: ./data
+  backup_root: ./backups

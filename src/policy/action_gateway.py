@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Optional
 
 from harness.adapters import (
@@ -54,6 +55,7 @@ class ActionGateway:
     """Single entry for gated side effects used by INV-* contract tests."""
 
     clock: FakeClock
+    approvals_path: Path | str | None = None
     approvals: ApprovalStore = field(init=False)
     kill: KillSwitches = field(default_factory=KillSwitches)
     audit: AuditLog = field(init=False)
@@ -64,7 +66,7 @@ class ActionGateway:
     execute_attempts: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.approvals = ApprovalStore(self.clock)
+        self.approvals = ApprovalStore(self.clock, persist_path=self.approvals_path)
         self.audit = AuditLog(self.clock)
         self.cron = StubCronEmitter(self.kill)
 

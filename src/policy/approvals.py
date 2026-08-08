@@ -6,9 +6,11 @@ Statuses: pending | accepted | denied | expired | executed | failed | cancelled
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -150,6 +152,37 @@ class ApprovalItem:
             data[key] = val.isoformat() if val is not None else None
         return data
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ApprovalItem":
+        def parse_dt(val: Any) -> Optional[datetime]:
+            if val is None:
+                return None
+            if isinstance(val, datetime):
+                return val
+            return datetime.fromisoformat(str(val))
+
+        return cls(
+            id=data["id"],
+            action_type=data["action_type"],
+            summary=data["summary"],
+            payload=dict(data.get("payload") or {}),
+            tier=ApprovalTier(data["tier"]),
+            status=ApprovalStatus(data["status"]),
+            created_at=parse_dt(data["created_at"]),
+            expires_at=parse_dt(data.get("expires_at")),
+            estimated_cost=data.get("estimated_cost"),
+            diff_summary=data.get("diff_summary"),
+            files_touched=data.get("files_touched"),
+            rollback_ref=data.get("rollback_ref"),
+            source_channel=data.get("source_channel"),
+            source_utterance=data.get("source_utterance"),
+            subtype=data.get("subtype"),
+            decided_at=parse_dt(data.get("decided_at")),
+            executed_at=parse_dt(data.get("executed_at")),
+            error=data.get("error"),
+            meta=dict(data.get("meta") or {}),
+        )
+
 
 class ApprovalError(Exception):
     """Raised when an illegal approval transition or execute is attempted."""
@@ -160,11 +193,24 @@ class ApprovalError(Exception):
 
 
 class ApprovalStore:
-    """In-memory approval items with status machine + clock-driven expiry."""
+    """Approval items with status machine + optional disk durability."""
 
-    def __init__(self, clock: FakeClock) -> None:
+    def __init__(
+        self,
+        clock: FakeClock,
+        *,
+        persist_path: Path | str | None = None,
+    ) -> None:
         self.clock = clock
+        self._persist_path = Path(persist_path) if persist_path is not None else None
         self._items: dict[str, ApprovalItem] = {}
+        if self._persist_path is not None and self._persist_path.exists():
+            self._load_from_disk()
+
+    @classmethod
+    def open(cls, path: Path | str, clock: FakeClock) -> "ApprovalStore":
+        """Re-open a durable store from disk (harness Gateway restart)."""
+        return cls(clock, persist_path=path)
 
     def get(self, approval_id: str) -> Optional[ApprovalItem]:
         self.expire_due()
@@ -235,6 +281,7 @@ class ApprovalStore:
             subtype=subtype,
         )
         self._items[item.id] = item
+        self._maybe_persist()
         return item
 
     def accept(self, approval_id: str) -> ApprovalItem:
@@ -250,6 +297,7 @@ class ApprovalStore:
             )
         item.status = ApprovalStatus.ACCEPTED
         item.decided_at = self.clock.now()
+        self._maybe_persist()
         return item
 
     def deny(self, approval_id: str) -> ApprovalItem:
@@ -263,6 +311,7 @@ class ApprovalStore:
             )
         item.status = ApprovalStatus.DENIED
         item.decided_at = self.clock.now()
+        self._maybe_persist()
         return item
 
     def mark_executed(self, approval_id: str) -> ApprovalItem:
@@ -274,6 +323,7 @@ class ApprovalStore:
             )
         item.status = ApprovalStatus.EXECUTED
         item.executed_at = self.clock.now()
+        self._maybe_persist()
         return item
 
     def mark_failed(self, approval_id: str, error: str) -> ApprovalItem:
@@ -286,6 +336,7 @@ class ApprovalStore:
         item.status = ApprovalStatus.FAILED
         item.error = error
         item.executed_at = self.clock.now()
+        self._maybe_persist()
         return item
 
     def cancel_pending(self) -> list[ApprovalItem]:
@@ -298,6 +349,8 @@ class ApprovalStore:
                 item.status = ApprovalStatus.CANCELLED
                 item.decided_at = now
                 cancelled.append(item)
+        if cancelled:
+            self._maybe_persist()
         return cancelled
 
     def expire_due(self) -> list[ApprovalItem]:
@@ -313,6 +366,8 @@ class ApprovalStore:
                 item.status = ApprovalStatus.EXPIRED
                 item.decided_at = now
                 expired.append(item)
+        if expired:
+            self._maybe_persist()
         return expired
 
     def can_execute(self, approval_id: str) -> tuple[bool, str]:
@@ -334,3 +389,31 @@ class ApprovalStore:
     def snapshot(self) -> list[dict[str, Any]]:
         self.expire_due()
         return [i.to_dict() for i in self._items.values()]
+
+    @property
+    def persist_path(self) -> Path | None:
+        return self._persist_path
+
+    def _load_from_disk(self) -> None:
+        if self._persist_path is None:
+            return
+        raw = json.loads(self._persist_path.read_text(encoding="utf-8"))
+        self._items.clear()
+        for item_data in raw.get("items", []):
+            item = ApprovalItem.from_dict(item_data)
+            self._items[item.id] = item
+
+    def _maybe_persist(self) -> None:
+        if self._persist_path is None:
+            return
+        self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "items": [i.to_dict() for i in self._items.values()],
+        }
+        tmp = self._persist_path.with_suffix(self._persist_path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        tmp.replace(self._persist_path)

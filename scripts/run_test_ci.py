@@ -22,6 +22,8 @@ if str(SRC) not in sys.path:
 
 from harness.artifacts import write_report  # noqa: E402
 from harness.clock import FakeClock  # noqa: E402
+from harness.gateway_harness import GatewayHarness  # noqa: E402
+from harness.gateway_profile import gateway_data_paths, load_gateway_profile  # noqa: E402
 from harness.ingress_sim import IngressSimulator  # noqa: E402
 from harness.inv_runner import run_all  # noqa: E402
 from harness.outbound import OutboundMessageCatcher  # noqa: E402
@@ -339,6 +341,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     )
 
     checks.extend(_run_memory_integration_checks(ROOT))
+    checks.extend(_run_task05_hosting_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -431,6 +434,121 @@ def _run_memory_integration_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
+def _run_task05_hosting_checks(root: Path) -> list[dict[str, Any]]:
+    """E2E-10 prep: durable approvals survive harness Gateway restart."""
+    checks: list[dict[str, Any]] = []
+
+    # Config templates loadable (harness JSON profile + backup manifest).
+    profile = load_gateway_profile(root / "config" / "gateway.harness.json")
+    paths = gateway_data_paths(profile)
+    backup_manifest = root / "config" / "backup.example.json"
+    config_ok = (
+        profile.get("gateway", {}).get("mode") == "harness"
+        and paths["approvals"].name == "items.json"
+        and backup_manifest.exists()
+    )
+    checks.append(
+        {
+            "id": "integration.hosting.config_profile",
+            "result": "PASS" if config_ok else "FAIL",
+            "detail": (
+                f"mode={profile.get('gateway', {}).get('mode')} "
+                f"approvals={paths['approvals']} backup_manifest={backup_manifest.exists()}"
+            ),
+        }
+    )
+
+    with tempfile.TemporaryDirectory(prefix="task05-hosting-") as tmp:
+        mem_root = Path(tmp)
+        approvals_path = mem_root / "approvals" / "items.json"
+        clock = FakeClock()
+
+        # Phase 1: create pending purchase approval (E2E-10 step 1).
+        gw1 = ActionGateway(clock=clock, approvals_path=approvals_path)
+        prop = gw1.propose(
+            "buy",
+            "protein powder purchase",
+            {"sku": "protein-powder", "price": 42.0},
+            estimated_cost=42.0,
+        )
+        approval_id = prop.approval_id
+        pending_before = gw1.approvals.list(status=ApprovalStatus.PENDING)
+        disk_ok = approvals_path.exists()
+
+        # Phase 2: simulate Gateway restart — new process, reopen store (E2E-10 step 2).
+        gw2 = ActionGateway(clock=clock, approvals_path=approvals_path)
+        reopened = gw2.approvals.get(approval_id or "")
+        pending_after = gw2.approvals.list(status=ApprovalStatus.PENDING)
+
+        restart_ok = (
+            prop.ok
+            and approval_id is not None
+            and disk_ok
+            and len(pending_before) == 1
+            and reopened is not None
+            and reopened.status == ApprovalStatus.PENDING
+            and len(pending_after) == 1
+            and pending_after[0].id == approval_id
+        )
+        checks.append(
+            {
+                "id": "integration.hosting.approval_survives_restart",
+                "result": "PASS" if restart_ok else "FAIL",
+                "detail": (
+                    f"approval_id={approval_id} disk={disk_ok} "
+                    f"pending_before={len(pending_before)} "
+                    f"pending_after={len(pending_after)} "
+                    f"status={reopened.status.value if reopened else None}"
+                ),
+            }
+        )
+
+        # Phase 3: Accept still works once; no duplicate execute (E2E-10 step 3).
+        gw2.accept(approval_id or "")
+        first = gw2.execute(approval_id or "")
+        second = gw2.execute(approval_id or "")
+        gw3 = ActionGateway(clock=clock, approvals_path=approvals_path)
+        final_item = gw3.approvals.get(approval_id or "")
+
+        accept_once_ok = (
+            first.ok
+            and gw2.commerce.buy_count == 1
+            and (not second.ok)
+            and final_item is not None
+            and final_item.status == ApprovalStatus.EXECUTED
+        )
+        checks.append(
+            {
+                "id": "integration.hosting.accept_once_after_restart",
+                "result": "PASS" if accept_once_ok else "FAIL",
+                "detail": (
+                    f"first={first.ok} second={second.ok} "
+                    f"buy_count={gw2.commerce.buy_count} "
+                    f"status={final_item.status.value if final_item else None}"
+                ),
+            }
+        )
+
+        # GatewayHarness wrapper restart path (same checks via harness API).
+        harness_profile = {
+            "gateway": {"name": "task05", "mode": "harness"},
+            "data_root": str(mem_root),
+            "paths": {"approvals": str(approvals_path)},
+        }
+        h1 = GatewayHarness(clock=clock, profile=harness_profile)
+        h2 = h1.restart()
+        harness_ok = h2.gateway.approvals.get(approval_id or "") is not None
+        checks.append(
+            {
+                "id": "integration.hosting.gateway_harness_restart",
+                "result": "PASS" if harness_ok else "FAIL",
+                "detail": f"reopened_via_harness={harness_ok}",
+            }
+        )
+
+    return checks
+
+
 def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> int:
     overall = "PASS" if all(L["result"] == "PASS" for L in layers) else "FAIL"
     flat_checks: list[dict[str, Any]] = []
@@ -462,6 +580,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/ci/",
                     "artifacts/test/task-03/",
                     "artifacts/test/task-04/",
+                    "artifacts/test/task-05/",
                 ],
             },
         },
@@ -485,6 +604,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/ci/report.json",
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
+            "artifacts/test/task-05/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -708,6 +828,75 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-04/report.json",
                     "artifacts/test/task-04/verification.json",
                     "fixtures/memory/seed-profile.json",
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # TASK-05 hosting / reboot durability artifacts.
+    task05 = ROOT / "artifacts" / "test" / "task-05"
+    task05.mkdir(parents=True, exist_ok=True)
+    hosting_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.hosting.")
+    ]
+    hosting_pass = (
+        all(c.get("result") == "PASS" for c in hosting_integration)
+        if hosting_integration
+        else False
+    )
+    write_report(
+        task05,
+        layer="task-05",
+        result="PASS"
+        if (overall == "PASS" and hosting_pass)
+        else ("FAIL" if not broken else overall),
+        checks=hosting_integration,
+        extra={
+            "broken_allow_all": broken,
+            "ci_overall": overall,
+            "e2e_flow": "E2E-10 (restart mid-flight) — prep",
+            "config": [
+                "config/gateway.harness.json",
+                "config/gateway.example.yaml",
+                "config/backup.example.json",
+            ],
+            "agent_b_rerun": {
+                "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                "fail_closed_proof": [
+                    "./scripts/test-ci.sh --break-invariant",
+                    "make test-ci-fail-closed",
+                ],
+                "artifacts": "artifacts/test/task-05/",
+            },
+        },
+    )
+    (task05 / "verification.json").write_text(
+        json.dumps(
+            {
+                "claim": (
+                    "Gateway config skeleton + durable approval store survives harness "
+                    "restart; Accept works once (E2E-10 prep)"
+                ),
+                "result": "PASS"
+                if (overall == "PASS" and hosting_pass)
+                else ("FAIL" if not broken else overall),
+                "ci_overall": overall,
+                "e2e_flow": "E2E-10",
+                "integration_checks": [c.get("id") for c in hosting_integration],
+                "commands": ["./scripts/test-ci.sh", "make test-ci"],
+                "artifacts": [
+                    "artifacts/test/task-05/report.json",
+                    "artifacts/test/task-05/verification.json",
+                    "config/gateway.harness.json",
+                    "config/backup.example.json",
                 ],
             },
             indent=2,
