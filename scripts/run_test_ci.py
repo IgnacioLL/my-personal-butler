@@ -90,6 +90,18 @@ from capabilities.shopping.parse import (  # noqa: E402
 )
 from capabilities.shopping.service import ShoppingService  # noqa: E402
 from capabilities.shopping.store import PurchaseStatus  # noqa: E402
+from capabilities.selfmod.allowlist import (  # noqa: E402
+    AllowlistConfig,
+    is_policy_path,
+    path_allowed,
+)
+from capabilities.selfmod.parse import (  # noqa: E402
+    EXPECTED_E2E08_UTTERANCE,
+    looks_like_self_mod,
+    parse_self_mod,
+)
+from capabilities.selfmod.secrets import scan_diff_for_secrets  # noqa: E402
+from capabilities.selfmod.service import SelfModService  # noqa: E402
 from capabilities.todos.parse import looks_like_todo_add, parse_todo  # noqa: E402
 from capabilities.todos.service import TodoService  # noqa: E402
 from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normalize_title  # noqa: E402
@@ -294,6 +306,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_diet_unit_checks(ROOT))
     checks.extend(_run_booking_unit_checks(ROOT))
     checks.extend(_run_shopping_unit_checks(ROOT))
+    checks.extend(_run_selfmod_unit_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -631,6 +644,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_diet_integration_checks(ROOT))
     checks.extend(_run_booking_integration_checks(ROOT))
     checks.extend(_run_shopping_integration_checks(ROOT))
+    checks.extend(_run_selfmod_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -2830,6 +2844,363 @@ def _run_shopping_integration_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
+def _run_selfmod_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Allowlist globs, secret scanner, quiet-hours parse, policy-path heuristic."""
+    checks: list[dict[str, Any]] = []
+    cfg = AllowlistConfig.from_file(root / "fixtures" / "selfmod" / "allowlist.json")
+
+    allow_ok = (
+        path_allowed("skills/reminders.md", cfg)
+        and path_allowed("config/agent.json", cfg)
+        and path_allowed("src/policy/approvals_stub.py", cfg)
+        and not path_allowed("src/runtime/gateway.py", cfg)
+        and not path_allowed("secrets/api_key.txt", cfg)
+        and not path_allowed(".env", cfg)
+        and not path_allowed("../../etc/passwd", cfg)
+    )
+    checks.append(
+        {
+            "id": "unit.selfmod.allowlist_globs",
+            "result": "PASS" if allow_ok else "FAIL",
+            "detail": f"allowed={cfg.allowed_globs[:2]}… forbidden={cfg.forbidden_globs}",
+        }
+    )
+
+    policy_ok = is_policy_path(
+        "src/policy/approvals_stub.py", cfg
+    ) and not is_policy_path("skills/reminders.md", cfg)
+    checks.append(
+        {
+            "id": "unit.selfmod.policy_path_heuristic",
+            "result": "PASS" if policy_ok else "FAIL",
+            "detail": "src/policy/* → policy-change; skills/* → normal self-mod",
+        }
+    )
+
+    secret_hit = bool(
+        scan_diff_for_secrets("api_key = sk-abcdefghijklmnopqrstuvwxyz012345")
+    )
+    secret_clean = not scan_diff_for_secrets('quiet_hours:\n  enabled: true\n')
+    checks.append(
+        {
+            "id": "unit.selfmod.secret_scanner",
+            "result": "PASS" if (secret_hit and secret_clean) else "FAIL",
+            "detail": f"hit={secret_hit} clean={secret_clean}",
+        }
+    )
+
+    parse_ok = looks_like_self_mod(EXPECTED_E2E08_UTTERANCE)
+    parsed = parse_self_mod(EXPECTED_E2E08_UTTERANCE)
+    parse_detail_ok = (
+        parse_ok
+        and parsed.kind == "quiet_hours"
+        and parsed.no_calls_after == "22:00"
+        and not looks_like_self_mod("Buy my usual protein powder.")
+    )
+    checks.append(
+        {
+            "id": "unit.selfmod.parse_quiet_hours",
+            "result": "PASS" if parse_detail_ok else "FAIL",
+            "detail": (
+                f"kind={parsed.kind} after={parsed.no_calls_after} looks={parse_ok}"
+            ),
+        }
+    )
+
+    tier_ok = (
+        tier_for("self_mod_apply") == ApprovalTier.HARD_APPROVE
+        and tier_for("policy_change") == ApprovalTier.HARD_APPROVE
+        and tier_for("source_read") == ApprovalTier.AUTO
+    )
+    checks.append(
+        {
+            "id": "unit.selfmod.hard_approve_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": (
+                f"apply={tier_for('self_mod_apply').value} "
+                f"policy={tier_for('policy_change').value}"
+            ),
+        }
+    )
+
+    return checks
+
+
+def _run_selfmod_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """Propose leaves tree clean; Accept applies; Deny/freeze/secrets/policy-change."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    tz = ZoneInfo("Europe/Madrid")
+    fixture = root / "fixtures" / "selfmod" / "sample-workspace"
+    allow = root / "fixtures" / "selfmod" / "allowlist.json"
+
+    clock = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz))
+    catcher = OutboundMessageCatcher()
+    gw = ActionGateway(clock=clock)
+    svc = SelfModService(
+        clock=clock,
+        catcher=catcher,
+        gateway=gw,
+        recipient=owner,
+        workspace_fixture=fixture,
+        allowlist_path=allow,
+    )
+
+    proposed = svc.propose_from_utterance(EXPECTED_E2E08_UTTERANCE)
+    pending = gw.approvals.list(status=ApprovalStatus.PENDING)
+    propose_ok = (
+        proposed.ok
+        and proposed.approval_id is not None
+        and proposed.tier == ApprovalTier.HARD_APPROVE.value
+        and proposed.action_type == "self_mod_apply"
+        and proposed.apply_available is False
+        and proposed.tree_clean
+        and svc.workspace.working_tree_clean()
+        and gw.selfmod.apply_count == 0
+        and proposed.rollback_ref is not None
+        and len(pending) == 1
+        and catcher.count() >= 1
+        and catcher.messages[0].meta.get("kind") == "selfmod_propose"
+    )
+    checks.append(
+        {
+            "id": "integration.selfmod.nl_propose_hard_approve",
+            "result": "PASS" if propose_ok else "FAIL",
+            "detail": (
+                f"ok={proposed.ok} apply_avail={proposed.apply_available} "
+                f"clean={proposed.tree_clean} apply={gw.selfmod.apply_count} "
+                f"rollback={proposed.rollback_ref} files={proposed.files_touched}"
+            ),
+        }
+    )
+
+    # Accept → apply on branch; audit has approval id.
+    inbox = AndroidApprovalInboxApi(gw)
+    accepted = (
+        inbox.accept(proposed.approval_id) if proposed.approval_id else None
+    )
+    result = (
+        accepted.execute.result
+        if accepted and accepted.execute and isinstance(accepted.execute.result, dict)
+        else {}
+    )
+    audits = (
+        gw.audit.for_approval(proposed.approval_id) if proposed.approval_id else []
+    )
+    accept_ok = (
+        accepted is not None
+        and accepted.ok
+        and gw.selfmod.apply_count == 1
+        and bool(result.get("rollback_ref"))
+        and result.get("rollback_ref") == proposed.rollback_ref
+        and bool(result.get("commit_sha"))
+        and str(result.get("branch", "")).startswith("cursor/agent-self-")
+        and any(a.success and a.approval_id == proposed.approval_id for a in audits)
+        and "enabled: true" in svc.workspace.read("skills/reminders.md")
+        and any(m.meta.get("kind") == "selfmod_applied" for m in catcher.messages)
+    )
+    checks.append(
+        {
+            "id": "integration.selfmod.accept_applies_with_rollback",
+            "result": "PASS" if accept_ok else "FAIL",
+            "detail": (
+                f"accept_ok={getattr(accepted, 'ok', None)} "
+                f"apply={gw.selfmod.apply_count} "
+                f"rollback={result.get('rollback_ref')} "
+                f"commit={result.get('commit_sha')} "
+                f"branch={result.get('branch')} audits={len(audits)}"
+            ),
+        }
+    )
+    svc.close()
+
+    # Deny → working tree unchanged.
+    deny_clock = FakeClock(start=datetime(2026, 1, 5, 11, 0, 0, tzinfo=tz))
+    deny_catcher = OutboundMessageCatcher()
+    deny_gw = ActionGateway(clock=deny_clock)
+    deny_svc = SelfModService(
+        clock=deny_clock,
+        catcher=deny_catcher,
+        gateway=deny_gw,
+        recipient=owner,
+        workspace_fixture=fixture,
+        allowlist_path=allow,
+    )
+    deny_prop = deny_svc.propose_from_utterance(EXPECTED_E2E08_UTTERANCE)
+    if deny_prop.approval_id:
+        AndroidApprovalInboxApi(deny_gw).deny(deny_prop.approval_id)
+        deny_gw.execute(deny_prop.approval_id)
+    deny_ok = (
+        deny_prop.ok
+        and deny_gw.selfmod.apply_count == 0
+        and deny_svc.workspace.working_tree_clean()
+        and "enabled: false" in deny_svc.workspace.read("skills/reminders.md")
+    )
+    checks.append(
+        {
+            "id": "integration.selfmod.deny_leaves_tree_clean",
+            "result": "PASS" if deny_ok else "FAIL",
+            "detail": (
+                f"apply={deny_gw.selfmod.apply_count} "
+                f"clean={deny_svc.workspace.working_tree_clean()}"
+            ),
+        }
+    )
+    deny_svc.close()
+
+    # Freeze blocks stale accepted apply.
+    freeze_clock = FakeClock(start=datetime(2026, 1, 5, 12, 0, 0, tzinfo=tz))
+    freeze_catcher = OutboundMessageCatcher()
+    freeze_gw = ActionGateway(clock=freeze_clock)
+    freeze_svc = SelfModService(
+        clock=freeze_clock,
+        catcher=freeze_catcher,
+        gateway=freeze_gw,
+        recipient=owner,
+        workspace_fixture=fixture,
+        allowlist_path=allow,
+    )
+    freeze_prop = freeze_svc.propose_from_utterance(EXPECTED_E2E08_UTTERANCE)
+    freeze_reason = None
+    if freeze_prop.approval_id:
+        freeze_gw.accept(freeze_prop.approval_id)
+        freeze_gw.freeze_self_mod()
+        freeze_exec = freeze_gw.execute(freeze_prop.approval_id)
+        freeze_reason = freeze_exec.reason
+    freeze_ok = (
+        freeze_gw.selfmod.apply_count == 0
+        and freeze_reason == "freeze_self_mod"
+        and freeze_svc.workspace.working_tree_clean()
+    )
+    checks.append(
+        {
+            "id": "integration.selfmod.freeze_blocks_apply",
+            "result": "PASS" if freeze_ok else "FAIL",
+            "detail": f"reason={freeze_reason} apply={freeze_gw.selfmod.apply_count}",
+        }
+    )
+    freeze_svc.close()
+
+    # Outside allowlist fail closed.
+    out_clock = FakeClock(start=datetime(2026, 1, 5, 13, 0, 0, tzinfo=tz))
+    out_gw = ActionGateway(clock=out_clock)
+    out_svc = SelfModService(
+        clock=out_clock,
+        catcher=OutboundMessageCatcher(),
+        gateway=out_gw,
+        recipient=owner,
+        workspace_fixture=fixture,
+        allowlist_path=allow,
+    )
+    outside = out_svc.propose_patch(
+        intent="escape",
+        summary="outside",
+        files={"../../etc/passwd": "x"},
+        diff_text="+x\n",
+    )
+    outside_ok = (
+        (not outside.ok)
+        and str(outside.reason).startswith("outside_allowlist")
+        and outside.approval_id is None
+        and out_gw.selfmod.apply_count == 0
+    )
+    checks.append(
+        {
+            "id": "integration.selfmod.outside_allowlist_fail_closed",
+            "result": "PASS" if outside_ok else "FAIL",
+            "detail": f"reason={outside.reason}",
+        }
+    )
+    out_svc.close()
+
+    # Secrets rejected.
+    sec_clock = FakeClock(start=datetime(2026, 1, 5, 14, 0, 0, tzinfo=tz))
+    sec_gw = ActionGateway(clock=sec_clock)
+    sec_svc = SelfModService(
+        clock=sec_clock,
+        catcher=OutboundMessageCatcher(),
+        gateway=sec_gw,
+        recipient=owner,
+        workspace_fixture=fixture,
+        allowlist_path=allow,
+    )
+    secret = sec_svc.propose_patch(
+        intent="leak",
+        summary="secret patch",
+        files={
+            "skills/reminders.md": (
+                "api_key = sk-abcdefghijklmnopqrstuvwxyz012345\n"
+            )
+        },
+        diff_text="+api_key = sk-abcdefghijklmnopqrstuvwxyz012345\n",
+    )
+    secret_ok = (
+        (not secret.ok)
+        and str(secret.reason).startswith("secrets_rejected")
+        and secret.approval_id is None
+        and sec_gw.selfmod.apply_count == 0
+    )
+    checks.append(
+        {
+            "id": "integration.selfmod.secrets_rejected",
+            "result": "PASS" if secret_ok else "FAIL",
+            "detail": f"reason={secret.reason}",
+        }
+    )
+    sec_svc.close()
+
+    # Policy-change subtype for approval/safety fixture code.
+    pol_clock = FakeClock(start=datetime(2026, 1, 5, 15, 0, 0, tzinfo=tz))
+    pol_catcher = OutboundMessageCatcher()
+    pol_gw = ActionGateway(clock=pol_clock)
+    pol_svc = SelfModService(
+        clock=pol_clock,
+        catcher=pol_catcher,
+        gateway=pol_gw,
+        recipient=owner,
+        workspace_fixture=fixture,
+        allowlist_path=allow,
+    )
+    pol_prop = pol_svc.propose_from_utterance(
+        "Policy change: raise spend cap in approval matrix stub."
+    )
+    pol_item = (
+        pol_gw.approvals.get(pol_prop.approval_id) if pol_prop.approval_id else None
+    )
+    pol_accept = (
+        AndroidApprovalInboxApi(pol_gw).accept(pol_prop.approval_id)
+        if pol_prop.approval_id
+        else None
+    )
+    pol_ok = (
+        pol_prop.ok
+        and pol_prop.action_type == "policy_change"
+        and pol_prop.subtype == "policy-change"
+        and pol_item is not None
+        and pol_item.subtype == "policy-change"
+        and pol_accept is not None
+        and pol_accept.ok
+        and pol_gw.selfmod.policy_change_count == 1
+        and "DEFAULT_SPEND_CAP = 100.0" in pol_svc.workspace.read(
+            "src/policy/approvals_stub.py"
+        )
+    )
+    checks.append(
+        {
+            "id": "integration.selfmod.policy_change_subtype",
+            "result": "PASS" if pol_ok else "FAIL",
+            "detail": (
+                f"action={pol_prop.action_type} subtype={pol_prop.subtype} "
+                f"item_subtype={getattr(pol_item, 'subtype', None)} "
+                f"policy_count={pol_gw.selfmod.policy_change_count}"
+            ),
+        }
+    )
+    pol_svc.close()
+
+    return checks
+
+
 def _run_android_approval_unit_checks() -> list[dict[str, Any]]:
     """Android approval inbox API: list/Accept/Deny/Edit + soft calendar gate."""
     checks: list[dict[str, Any]] = []
@@ -3512,6 +3883,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-20/",
                     "artifacts/test/task-21/",
                     "artifacts/test/task-22/",
+                    "artifacts/test/task-23/",
                 ],
             },
         },
@@ -3527,7 +3899,8 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "TASK-19 Booksy stub bookings (INV-BOOK-001/002) + "
             "E2E-06 propose→approve→book (+ deny) + E2E-09 expiry (T5) + "
             "TASK-21 shopping dry-run + spend caps/freeze (INV-PAY-001/002) + "
-            "E2E-07 shopping cap/freeze (+ deny gate; T6): "
+            "E2E-07 shopping cap/freeze (+ deny gate; T6) + "
+            "TASK-23 self-mod allowlist + hard-approve apply (INV-SELF-001..004): "
             "allowlisted DM; voice→transcript/clarify; Auto reminder/todo create; "
             "Android projection equality; calendar soft-confirm (INV-APPR-003); "
             "diet plan with banned-ingredient absence + grocery todos; "
@@ -3539,6 +3912,9 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "Accept under cap → dry-run receipt/audit; freeze blocks stale accepted "
             "approval execute; cap breach → spend_cap_* rejection artifact; "
             "E2E-07 deny path leaves buy_count=0; "
+            "self-mod propose leaves tree clean; Accept applies with rollback_ref + "
+            "audit; Deny/freeze/outside-allowlist/secrets fail closed; "
+            "policy-change subtype for safety code; "
             "fail-closed on broken INV"
         ),
         "result": overall,
@@ -3574,6 +3950,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-20/verification.json",
             "artifacts/test/task-21/verification.json",
             "artifacts/test/task-22/verification.json",
+            "artifacts/test/task-23/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -5640,6 +6017,366 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/e2e-07/approvals.json",
                         "artifacts/test/e2e-07/audit.json",
                         "artifacts/test/e2e-07/outbound-messages.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-23 Self-modification (diff → hard approve → apply) + INV-SELF-*.
+    # Fail-closed must not stomp happy-path task-23 verification.
+    selfmod_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.selfmod.")
+    ]
+    selfmod_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.selfmod.")
+    ]
+    self_invs = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-SELF-")
+    ]
+    task23_checks = selfmod_unit + selfmod_integration + self_invs
+    task23_pass = (
+        all(c.get("result") == "PASS" for c in task23_checks) if task23_checks else False
+    )
+    if not broken:
+        task23 = ROOT / "artifacts" / "test" / "task-23"
+        task23.mkdir(parents=True, exist_ok=True)
+        tz = ZoneInfo("Europe/Madrid")
+        monday = datetime(2026, 1, 5, 10, 0, 0, tzinfo=tz)
+        fixture = ROOT / "fixtures" / "selfmod" / "sample-workspace"
+        allow = ROOT / "fixtures" / "selfmod" / "allowlist.json"
+
+        demo_clock = FakeClock(start=monday)
+        demo_catcher = OutboundMessageCatcher()
+        demo_gw = ActionGateway(clock=demo_clock)
+        demo_svc = SelfModService(
+            clock=demo_clock,
+            catcher=demo_catcher,
+            gateway=demo_gw,
+            recipient="+15550001111",
+            workspace_fixture=fixture,
+            allowlist_path=allow,
+        )
+        demo_prop = demo_svc.propose_from_utterance(EXPECTED_E2E08_UTTERANCE)
+        apply_before = demo_gw.selfmod.apply_count
+        tree_before = demo_svc.workspace.working_tree_clean()
+        demo_inbox = AndroidApprovalInboxApi(demo_gw)
+        demo_accept = (
+            demo_inbox.accept(demo_prop.approval_id) if demo_prop.approval_id else None
+        )
+        demo_result = (
+            demo_accept.execute.result
+            if demo_accept
+            and demo_accept.execute
+            and isinstance(demo_accept.execute.result, dict)
+            else {}
+        )
+        demo_audits = (
+            demo_gw.audit.for_approval(demo_prop.approval_id)
+            if demo_prop.approval_id
+            else []
+        )
+
+        # Deny path.
+        deny_clock = FakeClock(start=monday)
+        deny_catcher = OutboundMessageCatcher()
+        deny_gw = ActionGateway(clock=deny_clock)
+        deny_svc = SelfModService(
+            clock=deny_clock,
+            catcher=deny_catcher,
+            gateway=deny_gw,
+            recipient="+15550001111",
+            workspace_fixture=fixture,
+            allowlist_path=allow,
+        )
+        deny_prop = deny_svc.propose_from_utterance(EXPECTED_E2E08_UTTERANCE)
+        if deny_prop.approval_id:
+            AndroidApprovalInboxApi(deny_gw).deny(deny_prop.approval_id)
+
+        # Freeze path.
+        freeze_clock = FakeClock(start=monday)
+        freeze_catcher = OutboundMessageCatcher()
+        freeze_gw = ActionGateway(clock=freeze_clock)
+        freeze_svc = SelfModService(
+            clock=freeze_clock,
+            catcher=freeze_catcher,
+            gateway=freeze_gw,
+            recipient="+15550001111",
+            workspace_fixture=fixture,
+            allowlist_path=allow,
+        )
+        freeze_prop = freeze_svc.propose_from_utterance(EXPECTED_E2E08_UTTERANCE)
+        freeze_exec_reason = None
+        if freeze_prop.approval_id:
+            freeze_gw.accept(freeze_prop.approval_id)
+            freeze_gw.freeze_self_mod()
+            freeze_exec = freeze_gw.execute(freeze_prop.approval_id)
+            freeze_exec_reason = freeze_exec.reason
+
+        # Outside allowlist.
+        out_clock = FakeClock(start=monday)
+        out_svc = SelfModService(
+            clock=out_clock,
+            catcher=OutboundMessageCatcher(),
+            gateway=ActionGateway(clock=out_clock),
+            recipient="+15550001111",
+            workspace_fixture=fixture,
+            allowlist_path=allow,
+        )
+        outside = out_svc.propose_patch(
+            intent="escape",
+            summary="outside",
+            files={"../../etc/passwd": "x"},
+            diff_text="+x\n",
+        )
+
+        # Secrets.
+        sec_clock = FakeClock(start=monday)
+        sec_svc = SelfModService(
+            clock=sec_clock,
+            catcher=OutboundMessageCatcher(),
+            gateway=ActionGateway(clock=sec_clock),
+            recipient="+15550001111",
+            workspace_fixture=fixture,
+            allowlist_path=allow,
+        )
+        secret = sec_svc.propose_patch(
+            intent="leak",
+            summary="secret",
+            files={
+                "skills/reminders.md": (
+                    "api_key = sk-abcdefghijklmnopqrstuvwxyz012345\n"
+                )
+            },
+            diff_text="+api_key = sk-abcdefghijklmnopqrstuvwxyz012345\n",
+        )
+
+        # Policy-change subtype.
+        pol_clock = FakeClock(start=monday)
+        pol_catcher = OutboundMessageCatcher()
+        pol_gw = ActionGateway(clock=pol_clock)
+        pol_svc = SelfModService(
+            clock=pol_clock,
+            catcher=pol_catcher,
+            gateway=pol_gw,
+            recipient="+15550001111",
+            workspace_fixture=fixture,
+            allowlist_path=allow,
+        )
+        pol_prop = pol_svc.propose_from_utterance(
+            "Policy change: raise spend cap in approval matrix stub."
+        )
+        pol_accept = (
+            AndroidApprovalInboxApi(pol_gw).accept(pol_prop.approval_id)
+            if pol_prop.approval_id
+            else None
+        )
+
+        (task23 / "proposals.json").write_text(
+            json.dumps(
+                {
+                    "accept_path": {
+                        "propose": demo_prop.to_dict(),
+                        "apply_count_at_propose": apply_before,
+                        "tree_clean_at_propose": tree_before,
+                        "accept_ok": getattr(demo_accept, "ok", None),
+                        "apply_result": demo_result,
+                        "apply_count": demo_gw.selfmod.apply_count,
+                        "workspace_status": demo_svc.workspace.status(),
+                    },
+                    "deny_path": {
+                        "propose": deny_prop.to_dict(),
+                        "apply_count": deny_gw.selfmod.apply_count,
+                        "tree_clean": deny_svc.workspace.working_tree_clean(),
+                    },
+                    "freeze_path": {
+                        "approval_id": freeze_prop.approval_id,
+                        "apply_count": freeze_gw.selfmod.apply_count,
+                        "execute_reason": freeze_exec_reason,
+                        "rejections": list(freeze_gw.execute_rejections),
+                    },
+                    "outside_allowlist": outside.to_dict(),
+                    "secrets_rejected": secret.to_dict(),
+                    "policy_change": {
+                        "propose": pol_prop.to_dict(),
+                        "accept_ok": getattr(pol_accept, "ok", None),
+                        "policy_change_count": pol_gw.selfmod.policy_change_count,
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        if demo_prop.diff_text:
+            diffs_dir = task23 / "diffs"
+            diffs_dir.mkdir(parents=True, exist_ok=True)
+            (diffs_dir / "quiet-hours.patch").write_text(
+                demo_prop.diff_text + "\n", encoding="utf-8"
+            )
+        demo_catcher.write_json(task23 / "outbound-messages.json")
+        (task23 / "approvals.json").write_text(
+            json.dumps(
+                {
+                    "accept": [a.to_dict() for a in demo_gw.approvals.list()],
+                    "deny": [a.to_dict() for a in deny_gw.approvals.list()],
+                    "freeze": [a.to_dict() for a in freeze_gw.approvals.list()],
+                    "policy_change": [a.to_dict() for a in pol_gw.approvals.list()],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (task23 / "audit.json").write_text(
+            json.dumps(
+                {
+                    "accept": demo_gw.audit.snapshot(),
+                    "freeze": freeze_gw.audit.snapshot(),
+                    "policy_change": pol_gw.audit.snapshot(),
+                    "accept_approval_audits": [
+                        a.to_dict() for a in demo_audits
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (task23 / "workspace-status.json").write_text(
+            json.dumps(
+                {
+                    "accept": demo_svc.workspace.status(),
+                    "deny": deny_svc.workspace.status(),
+                    "freeze": freeze_svc.workspace.status(),
+                    "allowlist": AllowlistConfig.from_file(allow).to_dict(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        e2e08_ready = (
+            task23_pass
+            and demo_prop.ok
+            and apply_before == 0
+            and tree_before
+            and demo_gw.selfmod.apply_count == 1
+            and bool(demo_result.get("rollback_ref"))
+            and deny_gw.selfmod.apply_count == 0
+            and deny_svc.workspace.working_tree_clean()
+            and freeze_gw.selfmod.apply_count == 0
+            and freeze_exec_reason == "freeze_self_mod"
+            and (not outside.ok)
+            and (not secret.ok)
+            and pol_prop.subtype == "policy-change"
+            and pol_gw.selfmod.policy_change_count == 1
+        )
+
+        demo_svc.close()
+        deny_svc.close()
+        freeze_svc.close()
+        out_svc.close()
+        sec_svc.close()
+        pol_svc.close()
+
+        write_report(
+            task23,
+            layer="task-23",
+            result="PASS" if task23_pass else "FAIL",
+            checks=task23_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-08",
+                "e2e08_ready": e2e08_ready,
+                "apply_count_after_accept": demo_gw.selfmod.apply_count,
+                "apply_count_after_deny": deny_gw.selfmod.apply_count,
+                "apply_count_after_freeze": freeze_gw.selfmod.apply_count,
+                "rollback_ref": demo_result.get("rollback_ref"),
+                "commit_sha": demo_result.get("commit_sha"),
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-23/",
+                },
+            },
+        )
+        (task23 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "TASK-23 self-mod: allowlisted fixture workspace; quiet-hours "
+                        "propose leaves tree clean + apply tools unavailable; Accept → "
+                        "apply on cursor/agent-self-* branch with rollback_ref + audit "
+                        "approval id; Deny leaves tree unchanged; outside allowlist fail "
+                        "closed; freeze_self_mod blocks apply; secrets rejected from "
+                        "proposed commits; policy-change subtype for approval/safety "
+                        "code; INV-SELF-001..004 green; E2E-08 readiness"
+                    ),
+                    "result": "PASS" if task23_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-08",
+                    "e2e08_ready": e2e08_ready,
+                    "invariants": [
+                        "INV-SELF-001",
+                        "INV-SELF-002",
+                        "INV-SELF-003",
+                        "INV-SELF-004",
+                    ],
+                    "unit_checks": [c.get("id") for c in selfmod_unit],
+                    "integration_checks": [c.get("id") for c in selfmod_integration],
+                    "apply_count_after_accept": demo_gw.selfmod.apply_count,
+                    "apply_count_after_deny": deny_gw.selfmod.apply_count,
+                    "apply_count_after_freeze": freeze_gw.selfmod.apply_count,
+                    "rollback_ref": demo_result.get("rollback_ref"),
+                    "commit_sha": demo_result.get("commit_sha"),
+                    "policy_change_subtype": pol_prop.subtype,
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                        "make e2e-02",
+                        "make e2e-03",
+                        "make e2e-04",
+                        "make e2e-05",
+                        "make e2e-06",
+                        "make e2e-07",
+                        "make e2e-09",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-23/report.json",
+                        "artifacts/test/task-23/verification.json",
+                        "artifacts/test/task-23/proposals.json",
+                        "artifacts/test/task-23/approvals.json",
+                        "artifacts/test/task-23/audit.json",
+                        "artifacts/test/task-23/workspace-status.json",
+                        "artifacts/test/task-23/outbound-messages.json",
+                        "artifacts/test/task-23/diffs/quiet-hours.patch",
                     ],
                 },
                 indent=2,

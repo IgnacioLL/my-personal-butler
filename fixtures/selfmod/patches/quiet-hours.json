@@ -1,0 +1,20 @@
+{
+  "id": "quiet-hours-no-calls-after-22",
+  "intent": "Add quiet hours: no calls after 22:00.",
+  "summary": "Enable quiet hours — block outbound calls after 22:00",
+  "files": [
+    {
+      "path": "skills/reminders.md",
+      "hunk_summary": "enable quiet hours; block_calls true; start 22:00"
+    },
+    {
+      "path": "config/agent.json",
+      "hunk_summary": "quiet_hours.enabled=true; no_calls_after=22:00"
+    }
+  ],
+  "risk_notes": [
+    "Affects proactive call escalation only",
+    "No approval-matrix change"
+  ],
+  "checks": ["unit.selfmod.quiet_hours_patch"]
+}

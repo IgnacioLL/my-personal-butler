@@ -72,6 +72,7 @@ class ActionGateway:
     todos: TodoStore | None = None
     bookings: BookingStore | None = None
     shopping: PurchaseStore | None = None
+    selfmod_service: Any | None = None  # SelfModService when attached
     spend: SpendLedger = field(default_factory=SpendLedger)
     outbound: OutboundMessageCatcher | None = None
     cron: StubCronEmitter = field(init=False)
@@ -129,6 +130,20 @@ class ActionGateway:
 
     def freeze_self_mod(self) -> None:
         self.kill.freeze_self_mod()
+
+    def unfreeze_self_mod(self) -> None:
+        self.kill.unfreeze_self_mod()
+
+    def attach_selfmod(
+        self,
+        service: Any,
+        *,
+        outbound: OutboundMessageCatcher | None = None,
+    ) -> None:
+        """Wire self-mod service for allowlisted propose → hard-approve apply."""
+        self.selfmod_service = service
+        if outbound is not None:
+            self.outbound = outbound
 
     def cancel_pending(self) -> list[str]:
         cancelled = self.approvals.cancel_pending()
@@ -195,6 +210,11 @@ class ActionGateway:
             self._mark_booking_denied(getattr(item, "payload", None) or {})
         if item is not None and getattr(item, "action_type", None) == "buy":
             self._mark_purchase_denied(getattr(item, "payload", None) or {})
+        if item is not None and getattr(item, "action_type", None) in {
+            "self_mod_apply",
+            "policy_change",
+        }:
+            self._mark_selfmod_denied(approval_id)
         return item
 
     def edit(
@@ -241,6 +261,7 @@ class ActionGateway:
         blocked, block_reason = self.kill.blocks_execute(item.action_type)
         if blocked:
             # INV-PAY-001: freeze blocks buy even with stale accepted approval.
+            # INV-SELF-002: freeze self-mod disables apply/write immediately.
             self._record_execute_rejection(
                 approval_id=approval_id,
                 action_type=item.action_type,
@@ -249,6 +270,8 @@ class ActionGateway:
             )
             if item.action_type == "buy":
                 self._mark_purchase_blocked(item.payload, block_reason)
+            if item.action_type in {"self_mod_apply", "policy_change"}:
+                self._mark_selfmod_blocked(approval_id, block_reason)
             return ExecuteResult(
                 ok=False,
                 reason=block_reason,
@@ -277,7 +300,9 @@ class ActionGateway:
                 )
 
         try:
-            adapter_result = self._run_adapter(item.action_type, item.payload)
+            adapter_result = self._run_adapter(
+                item.action_type, item.payload, approval_id=approval_id
+            )
             self.approvals.mark_executed(approval_id)
             if item.action_type == "buy":
                 self._record_buy_spend(item.payload, adapter_result, approval_id)
@@ -348,15 +373,25 @@ class ActionGateway:
             )
         return ExecuteResult(ok=False, reason="unsupported", approval_id=None)
 
-    def _run_adapter(self, action_type: str, payload: dict[str, Any]) -> Any:
+    def _run_adapter(
+        self,
+        action_type: str,
+        payload: dict[str, Any],
+        *,
+        approval_id: str | None = None,
+    ) -> Any:
         if action_type == "buy":
             return self._execute_buy(payload)
         if action_type == "book":
             return self._execute_book(payload)
         if action_type == "self_mod_apply":
-            return self.selfmod.apply(payload)
+            return self._execute_self_mod(
+                payload, action_type="self_mod_apply", approval_id=approval_id
+            )
         if action_type == "policy_change":
-            return self.selfmod.policy_change(payload)
+            return self._execute_self_mod(
+                payload, action_type="policy_change", approval_id=approval_id
+            )
         if action_type == "calendar_create":
             return self.calendar.create(payload)
         if action_type == "calendar_modify":
@@ -383,6 +418,34 @@ class ActionGateway:
         }:
             return {"stub": True, "action_type": action_type, "payload": payload}
         raise ApprovalError("unknown_adapter", f"no adapter for {action_type!r}")
+
+    def _execute_self_mod(
+        self,
+        payload: dict[str, Any],
+        *,
+        action_type: str,
+        approval_id: str | None = None,
+    ) -> Any:
+        """Apply allowlisted patch after Accept (or stub when no service attached)."""
+        if self.selfmod_service is not None:
+            return self.selfmod_service.apply_payload(
+                payload,
+                approval_id=approval_id,
+                action_type=action_type,
+            )
+        if action_type == "policy_change":
+            return self.selfmod.policy_change(payload)
+        return self.selfmod.apply(payload)
+
+    def _mark_selfmod_denied(self, approval_id: str) -> None:
+        if self.selfmod_service is None:
+            return
+        self.selfmod_service.mark_denied(approval_id)
+
+    def _mark_selfmod_blocked(self, approval_id: str, reason: str) -> None:
+        if self.selfmod_service is None:
+            return
+        self.selfmod_service.mark_blocked(approval_id, reason)
 
     def _resolve_book_slot(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Resolve start/end from chosen_slot_index + options when present."""

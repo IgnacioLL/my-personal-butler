@@ -299,11 +299,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-02, TASK-11
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Allowlisted paths; propose diff; apply only on Accept; freeze self-mod; secrets rejection; policy-change subtype; rollback refs; `INV-SELF-*`. Per `capabilities/self-modification.md`.
 - **Acceptance:** Sample workspace fixtures; invariants green.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Fixture mini-repo under `fixtures/selfmod/` + allowlist; `SelfModService` propose leaves tree clean / apply tools unavailable until Accept; Accept applies on `cursor/agent-self-*` branch with `rollback_ref` + audit approval id; Deny unchanged; outside allowlist fail closed; `freeze_self_mod` blocks apply; secrets rejected at propose; policy-change subtype for `src/policy/**`; `INV-SELF-001..004` green; `make test-ci` + fail-closed PASS; **E2E-08 ready** for TASK-24.
+- **Artifacts:** `artifacts/test/task-23/` (`verification.json`, `proposals.json`, `approvals.json`, `audit.json`, `workspace-status.json`, `diffs/quiet-hours.patch`, `outbound-messages.json`); `src/capabilities/selfmod/`; `src/invariants/inv_self_00{1,2,3,4}.py`; `fixtures/selfmod/`; `config/selfmod.harness.json`
 
 ### TASK-24 — E2E-08 Self-mod patch (+ deny)
 - **Phase:** 7 / T7
@@ -413,6 +413,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 02:00 | TASK-22 | Agent A | cursor-grok-4.5-high | implement | E2E-07 gate + test:ci; T6 exit ready; status → review |
 | 2026-08-08 23:31 | TASK-22 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-07/test-ci/fail-closed/sample e2e exit 0; accept/freeze/cap/deny spot-checks; T6 exit; status → done |
 | 2026-08-09 01:55 | TASK-23 | subagent-A | cursor-grok-4.5-high | implement | Self-mod allowlist + hard approve apply + INV-SELF |
+| 2026-08-09 02:15 | TASK-23 | Agent A | cursor-grok-4.5-high | implement | Self-mod + INV-SELF-001..004 + E2E-08 ready; status → review |
 
 ---
 
@@ -435,5 +436,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-22 done (E2E-07 / T6 exit PASS).  
-**Next:** Phase 7 self-mod (TASK-23).
+**Now:** TASK-23 in review (self-mod + INV-SELF-* + E2E-08 readiness).  
+**Next:** Agent B review TASK-23 → TASK-24 E2E-08 gate / T7 exit.

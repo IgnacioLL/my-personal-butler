@@ -1,0 +1,9 @@
+{
+  "skill": "self_modification",
+  "mode": "fixture_workspace",
+  "allowlist": "fixtures/selfmod/allowlist.json",
+  "workspace": "fixtures/selfmod/sample-workspace",
+  "branch_prefix": "cursor/agent-self-",
+  "diff_ceiling_lines": 400,
+  "notes": "Harness/CI self-mod. Apply only after hard Accept. freeze_self_mod blocks write/apply (INV-SELF-002). Secrets rejected at propose (INV-SELF-004)."
+}

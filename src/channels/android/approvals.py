@@ -30,6 +30,7 @@ class ApprovalProjection:
     subtype: Optional[str] = None
     diff_summary: Optional[str] = None
     files_touched: Optional[list[str]] = None
+    rollback_ref: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +47,7 @@ class ApprovalProjection:
             "subtype": self.subtype,
             "diff_summary": self.diff_summary,
             "files_touched": list(self.files_touched) if self.files_touched else None,
+            "rollback_ref": self.rollback_ref,
         }
 
 
@@ -64,6 +66,7 @@ def _project(item: ApprovalItem) -> ApprovalProjection:
         subtype=item.subtype,
         diff_summary=item.diff_summary,
         files_touched=list(item.files_touched) if item.files_touched else None,
+        rollback_ref=item.rollback_ref,
     )
 
 
