@@ -706,7 +706,7 @@ def run_e2e_03(
     artifacts_dir: Path | None = None,
     write_artifacts: bool = True,
 ) -> E2E03Result:
-    """E2E-03 — Todo WhatsApp → Android (gate prep for TASK-12).
+    """E2E-03 — Todo WhatsApp → Android (gate-tagged in test:ci).
 
     1. Text: 'Add todo: buy oat milk.'
     2. Read Android projection API.
@@ -849,10 +849,23 @@ def run_e2e_03(
             checks=checks,
             extra={
                 "flow": "E2E-03",
-                "gate": False,
+                "gate": True,
                 "utterance": utterance,
                 "todo_id": agent_todo.id if agent_todo else None,
                 "harness": "VirtualUser",
+                "agent_b_rerun": {
+                    "happy_path": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make e2e-03",
+                        "python3 scripts/run_e2e_03.py",
+                    ],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/e2e-03/",
+                },
             },
         )
         (out / "verification.json").write_text(
@@ -865,9 +878,14 @@ def run_e2e_03(
                     ),
                     "result": overall,
                     "flow": "E2E-03",
-                    "gate": False,
+                    "gate": True,
                     "checks": [c["id"] for c in checks],
-                    "commands": ["make test-ci"],
+                    "commands": [
+                        "python3 scripts/run_e2e_03.py",
+                        "make e2e-03",
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                    ],
                     "artifacts": [
                         "artifacts/test/e2e-03/report.json",
                         "artifacts/test/e2e-03/verification.json",

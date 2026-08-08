@@ -291,15 +291,15 @@ def run_contract(out_dir: Path, *, broken_allow_all: bool) -> dict[str, Any]:
 
 
 def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, Any]:
-    """Gate-tagged E2E flows (ci-gates.md). E2E-01 Virtual User voice reminder."""
+    """Gate-tagged E2E flows (ci-gates.md). E2E-01 + E2E-03 Virtual User journeys."""
     checks: list[dict[str, Any]] = []
-    e2e_dir = ROOT / "artifacts" / "test" / "e2e-01"
-    journey = run_e2e_01(
+    e2e01_dir = ROOT / "artifacts" / "test" / "e2e-01"
+    journey01 = run_e2e_01(
         root=ROOT,
-        artifacts_dir=e2e_dir,
+        artifacts_dir=e2e01_dir,
         write_artifacts=write_flow_artifacts,
     )
-    for check in journey.checks:
+    for check in journey01.checks:
         checks.append(
             {
                 "id": check["id"],
@@ -309,21 +309,45 @@ def run_e2e(out_dir: Path, *, write_flow_artifacts: bool = True) -> dict[str, An
                 "flow": "E2E-01",
             }
         )
+
+    e2e03_dir = ROOT / "artifacts" / "test" / "e2e-03"
+    journey03 = run_e2e_03(
+        root=ROOT,
+        artifacts_dir=e2e03_dir,
+        write_artifacts=write_flow_artifacts,
+    )
+    for check in journey03.checks:
+        checks.append(
+            {
+                "id": check["id"],
+                "result": check["result"],
+                "detail": check.get("detail", ""),
+                "gate": True,
+                "flow": "E2E-03",
+            }
+        )
+
     # Mirror a compact layer report under ci/e2e for aggregate layout.
     layer_dir = out_dir / "e2e"
-    result = "PASS" if journey.ok else "FAIL"
+    result = "PASS" if journey01.ok and journey03.ok else "FAIL"
     write_report(
         layer_dir,
         layer="e2e",
         result=result,
         checks=checks,
         extra={
-            "gate_flows": ["E2E-01"],
+            "gate_flows": ["E2E-01", "E2E-03"],
             "e2e_01_artifacts": "artifacts/test/e2e-01/",
+            "e2e_03_artifacts": "artifacts/test/e2e-03/",
             "harness": "VirtualUser",
         },
     )
-    return {"layer": "e2e", "result": result, "checks": checks, "flow": "E2E-01"}
+    return {
+        "layer": "e2e",
+        "result": result,
+        "checks": checks,
+        "flows": ["E2E-01", "E2E-03"],
+    }
 
 
 def run_integration(out_dir: Path) -> dict[str, Any]:
@@ -1816,6 +1840,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                 "artifacts": [
                     "artifacts/test/ci/",
                     "artifacts/test/e2e-01/",
+                    "artifacts/test/e2e-03/",
                     "artifacts/test/task-03/",
                     "artifacts/test/task-04/",
                     "artifacts/test/task-05/",
@@ -1833,8 +1858,9 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
     stamp = {
         "claim": (
             "WhatsApp ingress + memory R/W + transcription + reminders/habits + "
-            "E2E-01 Virtual User voice reminder gate: allowlisted DM; "
-            "voice→transcript/clarify; Auto reminder create; fail-closed on broken INV"
+            "E2E-01 voice reminder + E2E-03 todo sync gates: allowlisted DM; "
+            "voice→transcript/clarify; Auto reminder/todo create; Android projection "
+            "equality; fail-closed on broken INV"
         ),
         "result": overall,
         "broken_allow_all": broken,
@@ -1846,6 +1872,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
         "artifacts": [
             "artifacts/test/ci/report.json",
             "artifacts/test/e2e-01/verification.json",
+            "artifacts/test/e2e-03/verification.json",
             "artifacts/test/task-03/verification.json",
             "artifacts/test/task-04/verification.json",
             "artifacts/test/task-05/verification.json",
@@ -1861,7 +1888,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             if L["layer"] == "contract"
             for c in L.get("checks", [])
         ],
-        "gate_e2e": ["E2E-01"],
+        "gate_e2e": ["E2E-01", "E2E-03"],
     }
     (out_dir / "verification.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n",
@@ -2549,7 +2576,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             extra={
                 "broken_allow_all": broken,
                 "ci_overall": overall,
-                "e2e_flow": "E2E-03 (prep — gate in TASK-12)",
+                "e2e_flow": "E2E-03 (gate)",
                 "demo_todo_id": demo_created.todo.id if demo_created.todo else None,
                 "agent_b_rerun": {
                     "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
@@ -2567,7 +2594,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "claim": (
                         "Todo store + Android projection API doubles: WhatsApp "
                         "'Add todo' Auto-creates; list/get/complete reflect same ids; "
-                        "dedup near-identical open todos; E2E-03 Virtual User ready"
+                        "dedup near-identical open todos; E2E-03 gate green"
                     ),
                     "result": "PASS" if task10_pass else "FAIL",
                     "ci_overall": overall,
@@ -2580,6 +2607,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "make test-ci",
                         "make test-ci-fail-closed",
                         "make e2e-01",
+                        "make e2e-03",
                     ],
                     "artifacts": [
                         "artifacts/test/task-10/report.json",
@@ -2674,7 +2702,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.layer in ("all", "integration"):
             layers.append(run_integration(out_dir))
         if args.layer in ("all", "e2e"):
-            # Fail-closed must not stomp happy-path E2E-01 verification stamps.
+            # Fail-closed must not stomp happy-path E2E verification stamps.
             layers.append(
                 run_e2e(out_dir, write_flow_artifacts=not args.break_invariant)
             )
