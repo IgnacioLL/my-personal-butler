@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from capabilities.reminders.store import ReminderKind, ReminderStore
+from capabilities.todos.store import TodoSource, TodoStore
 from harness.adapters import (
     StubCalendarAdapter,
     StubCommerceAdapter,
@@ -64,6 +65,7 @@ class ActionGateway:
     commerce: StubCommerceAdapter = field(default_factory=StubCommerceAdapter)
     selfmod: StubSelfModAdapter = field(default_factory=StubSelfModAdapter)
     reminders: ReminderStore | None = None
+    todos: TodoStore | None = None
     cron: StubCronEmitter = field(init=False)
     execute_attempts: list[dict[str, Any]] = field(default_factory=list)
 
@@ -73,6 +75,8 @@ class ActionGateway:
         self.cron = StubCronEmitter(self.kill)
         if self.reminders is None:
             self.reminders = ReminderStore()
+        if self.todos is None:
+            self.todos = TodoStore()
 
     # --- Kill switches -------------------------------------------------
 
@@ -264,8 +268,11 @@ class ActionGateway:
             return self._create_reminder(payload)
         if action_type == "habit_create":
             return self._create_habit(payload)
+        if action_type == "todo_add":
+            return self._add_todo(payload)
+        if action_type == "todo_complete":
+            return self._complete_todo(payload)
         if action_type in {
-            "todo_add",
             "diet_draft",
             "whatsapp_reply",
             "calendar_read",
@@ -304,6 +311,51 @@ class ActionGateway:
             meta=dict(payload.get("meta") or {}),
         )
         return {"reminder_id": rem.id, "due_at": rem.due_at.isoformat(), "kind": rem.kind.value}
+
+    def _add_todo(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert self.todos is not None
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            raise ApprovalError("invalid_payload", "todo_add requires title")
+        created_from = payload.get("created_from") or TodoSource.AGENT.value
+        existing = self.todos.find_open_duplicate(title)
+        if existing is not None:
+            return {
+                "todo_id": existing.id,
+                "title": existing.title,
+                "status": existing.status.value,
+                "deduplicated": True,
+            }
+        todo = self.todos.create(
+            title=title,
+            created_at=self.clock.now(),
+            created_from=str(created_from),
+            notes=str(payload.get("notes") or ""),
+            tags=list(payload.get("tags") or []),
+        )
+        return {
+            "todo_id": todo.id,
+            "title": todo.title,
+            "status": todo.status.value,
+            "deduplicated": False,
+        }
+
+    def _complete_todo(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert self.todos is not None
+        todo_id = str(payload.get("todo_id") or "")
+        if not todo_id:
+            raise ApprovalError("invalid_payload", "todo_complete requires todo_id")
+        completed_from = payload.get("completed_from") or TodoSource.ANDROID.value
+        todo = self.todos.complete(
+            todo_id,
+            completed_at=self.clock.now(),
+            completed_from=str(completed_from),
+        )
+        return {
+            "todo_id": todo.id,
+            "title": todo.title,
+            "status": todo.status.value,
+        }
 
     def _create_habit(self, payload: dict[str, Any]) -> dict[str, Any]:
         assert self.reminders is not None

@@ -70,6 +70,7 @@ AUTO_ACTION_TYPES = frozenset(
         "memory_read",
         "todo_read",
         "todo_add",
+        "todo_complete",
         "reminder_create",
         "habit_create",
         "diet_draft",

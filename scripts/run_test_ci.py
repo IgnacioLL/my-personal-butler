@@ -28,7 +28,7 @@ from harness.gateway_profile import gateway_data_paths, load_gateway_profile  # 
 from harness.ingress_sim import IngressSimulator  # noqa: E402
 from harness.inv_runner import run_all  # noqa: E402
 from harness.outbound import OutboundMessageCatcher  # noqa: E402
-from harness.virtual_user import run_e2e_01  # noqa: E402
+from harness.virtual_user import run_e2e_01, run_e2e_03  # noqa: E402
 from harness.whatsapp_transport import MockWhatsAppTransport  # noqa: E402
 from policy.action_gateway import ActionGateway  # noqa: E402
 from policy.approvals import (  # noqa: E402
@@ -55,6 +55,10 @@ from capabilities.reminders.store import (  # noqa: E402
     ReminderStatus,
     ReminderStore,
 )
+from capabilities.todos.parse import looks_like_todo_add, parse_todo  # noqa: E402
+from capabilities.todos.service import TodoService  # noqa: E402
+from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normalize_title  # noqa: E402
+from channels.android.projection import AndroidProjectionApi  # noqa: E402
 
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
@@ -237,6 +241,7 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_transcription_unit_checks(ROOT))
     checks.extend(_run_models_unit_checks(ROOT))
     checks.extend(_run_reminder_unit_checks())
+    checks.extend(_run_todo_unit_checks())
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -403,6 +408,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_transcription_integration_checks(ROOT))
     checks.extend(_run_models_integration_checks(ROOT))
     checks.extend(_run_reminder_integration_checks(ROOT))
+    checks.extend(_run_todo_integration_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     layer_dir = out_dir / "integration"
@@ -1050,6 +1056,220 @@ def _run_reminder_integration_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
+def _run_todo_unit_checks() -> list[dict[str, Any]]:
+    """Parse todo utterances, store CRUD, dedup near-identical open todos."""
+    checks: list[dict[str, Any]] = []
+
+    parsed = parse_todo("Add todo: buy oat milk.")
+    parse_ok = parsed.title.lower() == "buy oat milk"
+    checks.append(
+        {
+            "id": "unit.todo.parse_add_utterance",
+            "result": "PASS" if parse_ok else "FAIL",
+            "detail": f"title={parsed.title!r}",
+        }
+    )
+
+    audio_parsed = parse_todo("[Audio] Add todo: buy oat milk.")
+    audio_ok = audio_parsed.title.lower() == "buy oat milk"
+    checks.append(
+        {
+            "id": "unit.todo.parse_audio_prefix",
+            "result": "PASS" if audio_ok else "FAIL",
+            "detail": f"title={audio_parsed.title!r}",
+        }
+    )
+
+    intent_ok = looks_like_todo_add("Add a todo: pack for trip") and not looks_like_todo_add(
+        "Remind me Sunday"
+    )
+    checks.append(
+        {
+            "id": "unit.todo.intent_detection",
+            "result": "PASS" if intent_ok else "FAIL",
+            "detail": f"todo={looks_like_todo_add('Add a todo: pack')} rem={looks_like_todo_add('Remind me')}",
+        }
+    )
+
+    tier_ok = (
+        tier_for("todo_add") == ApprovalTier.AUTO
+        and tier_for("todo_complete") == ApprovalTier.AUTO
+    )
+    checks.append(
+        {
+            "id": "unit.todo.auto_approval_tier",
+            "result": "PASS" if tier_ok else "FAIL",
+            "detail": (
+                f"todo_add={tier_for('todo_add').value} "
+                f"todo_complete={tier_for('todo_complete').value}"
+            ),
+        }
+    )
+
+    clock = FakeClock()
+    store = TodoStore()
+    t1 = store.create(title="Buy oat milk", created_at=clock.now(), created_from=TodoSource.WHATSAPP)
+    open_status = t1.status
+    dup = store.find_open_duplicate("buy oat milk")
+    t2 = store.complete(t1.id, completed_at=clock.now(), completed_from=TodoSource.ANDROID)
+    crud_ok = (
+        t1.id.startswith("todo-")
+        and open_status == TodoStatus.OPEN
+        and dup is not None
+        and dup.id == t1.id
+        and t2.status == TodoStatus.DONE
+        and len(store.list_open()) == 0
+    )
+    checks.append(
+        {
+            "id": "unit.todo.create_list_complete",
+            "result": "PASS" if crud_ok else "FAIL",
+            "detail": (
+                f"id={t1.id} dup={dup.id if dup else None} "
+                f"done={t2.status.value} open={len(store.list_open())}"
+            ),
+        }
+    )
+
+    store2 = TodoStore()
+    store2.create(title="Buy protein powder", created_at=clock.now())
+    near_dup = store2.find_open_duplicate("buy protein powder!")
+    dedup_ok = near_dup is not None and normalize_title(near_dup.title) == normalize_title(
+        "buy protein powder!"
+    )
+    checks.append(
+        {
+            "id": "unit.todo.dedup_near_identical",
+            "result": "PASS" if dedup_ok else "FAIL",
+            "detail": f"found={near_dup.title if near_dup else None}",
+        }
+    )
+
+    return checks
+
+
+def _run_todo_integration_checks(root: Path) -> list[dict[str, Any]]:
+    """WhatsApp todo create → Android projection equality; complete sync; dedup."""
+    checks: list[dict[str, Any]] = []
+    owner = "+15550001111"
+    clock = FakeClock()
+    catcher = OutboundMessageCatcher()
+    store = TodoStore()
+    gw = ActionGateway(clock=clock, todos=store)
+    svc = TodoService(store=store, clock=clock, catcher=catcher, gateway=gw, recipient=owner)
+    android = AndroidProjectionApi(store=store, clock=clock, gateway=gw)
+
+    created = svc.create_from_utterance("Add todo: buy oat milk.", recipient=owner)
+    pending = gw.approvals.list(status=ApprovalStatus.PENDING)
+    create_ok = (
+        created.ok
+        and created.todo is not None
+        and created.todo.title.lower() == "buy oat milk"
+        and created.todo.status == TodoStatus.OPEN
+        and created.tier == "auto"
+        and created.approval_id is None
+        and len(pending) == 0
+        and catcher.count() == 1
+        and catcher.messages[0].meta.get("kind") == "todo_confirm"
+    )
+    checks.append(
+        {
+            "id": "integration.todo.whatsapp_create_auto",
+            "result": "PASS" if create_ok else "FAIL",
+            "detail": (
+                f"ok={created.ok} title={created.todo.title if created.todo else None!r} "
+                f"tier={created.tier} outbound={catcher.count()}"
+            ),
+        }
+    )
+
+    assert created.todo is not None
+    projected = android.list_todos()
+    proj = projected[0] if projected else None
+    sync_ok = (
+        proj is not None
+        and proj.id == created.todo.id
+        and proj.title == created.todo.title
+        and proj.status == "open"
+        and android.get_todo(created.todo.id) == proj
+    )
+    checks.append(
+        {
+            "id": "integration.todo.android_projection_equality",
+            "result": "PASS" if sync_ok else "FAIL",
+            "detail": (
+                f"agent_id={created.todo.id} android_id={proj.id if proj else None} "
+                f"title={proj.title if proj else None!r} status={proj.status if proj else None}"
+            ),
+        }
+    )
+
+    completed = android.complete_todo(created.todo.id)
+    store_after = store.get(created.todo.id)
+    complete_ok = (
+        completed.status == "done"
+        and store_after is not None
+        and store_after.status == TodoStatus.DONE
+        and len(android.list_todos(status="open")) == 0
+    )
+    checks.append(
+        {
+            "id": "integration.todo.android_complete_reflects_store",
+            "result": "PASS" if complete_ok else "FAIL",
+            "detail": (
+                f"proj={completed.status} store={store_after.status.value if store_after else None}"
+            ),
+        }
+    )
+
+    # Dedup: second add with same title returns existing open todo (no duplicate row).
+    catcher2 = OutboundMessageCatcher()
+    store3 = TodoStore()
+    gw3 = ActionGateway(clock=clock, todos=store3)
+    svc3 = TodoService(store=store3, clock=clock, catcher=catcher2, gateway=gw3, recipient=owner)
+    first = svc3.create_from_utterance("Add todo: buy oat milk.", recipient=owner)
+    second = svc3.create_from_utterance("Add todo: Buy oat milk.", recipient=owner)
+    dedup_ok = (
+        first.ok
+        and second.ok
+        and second.deduplicated
+        and first.todo is not None
+        and second.todo is not None
+        and first.todo.id == second.todo.id
+        and len(store3.list_open()) == 1
+        and any(m.meta.get("kind") == "todo_dedup" for m in catcher2.messages)
+    )
+    checks.append(
+        {
+            "id": "integration.todo.dedup_whatsapp_readd",
+            "result": "PASS" if dedup_ok else "FAIL",
+            "detail": (
+                f"first={first.todo.id if first.todo else None} "
+                f"second_dedup={second.deduplicated} open={len(store3.list_open())}"
+            ),
+        }
+    )
+
+    # E2E-03 prep via Virtual User harness (full journey).
+    e2e03 = run_e2e_03(
+        root=root,
+        artifacts_dir=root / "artifacts" / "test" / "e2e-03",
+        write_artifacts=True,
+    )
+    checks.append(
+        {
+            "id": "integration.todo.e2e03_virtual_user_journey",
+            "result": e2e03.result,
+            "detail": (
+                f"todo_id={e2e03.todo_id} title={e2e03.title!r} status={e2e03.status} "
+                f"checks={len(e2e03.checks)}"
+            ),
+        }
+    )
+
+    return checks
+
+
 def _run_transcription_integration_checks(root: Path) -> list[dict[str, Any]]:
     """Voice note → STT stub → transcript turn OR clarification via mock WhatsApp."""
     checks: list[dict[str, Any]] = []
@@ -1424,6 +1644,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                     "artifacts/test/task-06/",
                     "artifacts/test/task-07/",
                     "artifacts/test/task-09/",
+                    "artifacts/test/task-10/",
                 ],
             },
         },
@@ -1452,6 +1673,7 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             "artifacts/test/task-06/verification.json",
             "artifacts/test/task-07/verification.json",
             "artifacts/test/task-09/verification.json",
+            "artifacts/test/task-10/verification.json",
         ],
         "invariants": [
             c.get("id")
@@ -2065,6 +2287,127 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-09/routing-decisions.json",
                         "artifacts/test/task-09/stub-snapshot.json",
                         "fixtures/models/routing-intents.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # TASK-10 todos + Android projection artifacts.
+    todo_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.todo.")
+    ]
+    todo_integration = [
+        c
+        for L in layers
+        if L["layer"] == "integration"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("integration.todo.")
+    ]
+    task10_checks = todo_unit + todo_integration
+    task10_pass = (
+        all(c.get("result") == "PASS" for c in task10_checks) if task10_checks else False
+    )
+    if not broken:
+        task10 = ROOT / "artifacts" / "test" / "task-10"
+        task10.mkdir(parents=True, exist_ok=True)
+        e2e03_demo = run_e2e_03(
+            root=ROOT,
+            artifacts_dir=ROOT / "artifacts" / "test" / "e2e-03",
+            write_artifacts=True,
+        )
+        demo_clock = FakeClock()
+        demo_store = TodoStore()
+        demo_gw = ActionGateway(clock=demo_clock, todos=demo_store)
+        demo_catcher = OutboundMessageCatcher()
+        demo_svc = TodoService(
+            store=demo_store,
+            clock=demo_clock,
+            catcher=demo_catcher,
+            gateway=demo_gw,
+            recipient="+15550001111",
+        )
+        demo_android = AndroidProjectionApi(
+            store=demo_store, clock=demo_clock, gateway=demo_gw
+        )
+        demo_created = demo_svc.create_from_utterance("Add todo: buy oat milk.")
+        demo_proj = demo_android.list_todos()
+        (task10 / "todos.json").write_text(
+            json.dumps(demo_store.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (task10 / "android-projection.json").write_text(
+            json.dumps(
+                {
+                    "before_complete": [p.to_dict() for p in demo_proj],
+                    "e2e03": {
+                        "result": e2e03_demo.result,
+                        "todo_id": e2e03_demo.todo_id,
+                        "title": e2e03_demo.title,
+                        "status": e2e03_demo.status,
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        demo_catcher.write_json(task10 / "outbound-messages.json")
+        write_report(
+            task10,
+            layer="task-10",
+            result="PASS" if task10_pass else "FAIL",
+            checks=task10_checks or flat_checks,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "e2e_flow": "E2E-03 (prep — gate in TASK-12)",
+                "demo_todo_id": demo_created.todo.id if demo_created.todo else None,
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/task-10/",
+                },
+            },
+        )
+        (task10 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "Todo store + Android projection API doubles: WhatsApp "
+                        "'Add todo' Auto-creates; list/get/complete reflect same ids; "
+                        "dedup near-identical open todos; E2E-03 Virtual User ready"
+                    ),
+                    "result": "PASS" if task10_pass else "FAIL",
+                    "ci_overall": overall,
+                    "e2e_flow": "E2E-03",
+                    "e2e03_result": e2e03_demo.result,
+                    "unit_checks": [c.get("id") for c in todo_unit],
+                    "integration_checks": [c.get("id") for c in todo_integration],
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-01",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/task-10/report.json",
+                        "artifacts/test/task-10/verification.json",
+                        "artifacts/test/task-10/todos.json",
+                        "artifacts/test/task-10/android-projection.json",
+                        "artifacts/test/task-10/outbound-messages.json",
+                        "artifacts/test/e2e-03/verification.json",
                     ],
                 },
                 indent=2,
