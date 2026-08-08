@@ -35,7 +35,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | Fake clock utility | done | `src/harness/clock.py` — `now()` / `advance(duration)` |
 | INV-* runner skeleton | done | `src/harness/inv_runner.py` + `src/invariants/` |
 | Virtual User harness | done | `src/harness/virtual_user.py` — inject audio/text, create reminders, assert state (E2E-01 gate) |
-| Phase exits require matching T* unlock | done | **T6 exit PASS** (TASK-21+22): dry-run merchant + E2E-07 + INV-PAY-*; **T7 ready** (TASK-24 E2E-08) |
+| Phase exits require matching T* unlock | done | **T7 exit PASS** (TASK-23+24): sample workspace fixtures + E2E-08 + INV-SELF-* + policy-change subtype; **T8 next** (TASK-25) |
 
 ---
 
@@ -310,11 +310,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-23
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** E2E-08 accept + deny; gate deny path.
 - **Acceptance:** T7 exit.
-- **Result:** Implement complete — awaiting Agent B. `make e2e-08` exit 0; `make test-ci` exit 0; `make test-ci-fail-closed` exit 0; sample prior e2e (`e2e-01`/`04`/`07`) exit 0. Spec: quiet-hours propose on allowlisted path; apply tools unavailable until Accept; Accept → apply + rollback_ref + audit approval id; Deny → tree unchanged (gate). `artifacts/test/e2e-08/verification.json` + `task-24` stamp `t7_exit=true`. INV-SELF-* not weakened. Fail-closed does not stomp e2e-08 verification.
-- **Artifacts:** `src/harness/virtual_user.py` (`run_e2e_08`, `E2E08Result`, SelfModService wiring), `scripts/run_e2e_08.py`, `Makefile` (`e2e-08`), `scripts/run_test_ci.py` (gate + task-24), `scripts/test-ci.sh`, `scripts/README.md`, `artifacts/test/e2e-08/`, `artifacts/test/task-24/`
+- **Result:** PASS (Agent B review) — Re-ran `make e2e-08` exit 0, `make test-ci` exit 0, `make test-ci-fail-closed` exit 0, sample prior e2e (`e2e-01`/`04`/`07`) exit 0. Spot-checks: Accept → apply once (`apply=1`, second execute `status=executed`, re-accept blocked); Deny → apply=0 tree/reminders unchanged; INV-SELF-001..004 PASS. Fail-closed does not stomp e2e-08/task-24 verification (`t7_exit=true`). INV-SELF-* not weakened. No code fixes required. **T7 exit PASS**.
+- **Artifacts:** `artifacts/test/e2e-08/` (`verification.json`, `report.json`, `proposals.json`, `approvals.json`, `audit.json`, `workspace-status.json`, `diffs/quiet-hours.patch`); `artifacts/test/task-24/`; `src/harness/virtual_user.py` (`run_e2e_08`); `scripts/run_e2e_08.py`; `Makefile` (`e2e-08`)
 
 ### TASK-25 — Polish: heartbeat, weekly review, soak, E2E-10
 - **Phase:** 8 / T8
@@ -417,6 +417,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 23:45 | TASK-23 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed/sample e2e exit 0; allowlist/Accept/freeze/secrets/rollback_ref/INV-SELF spot-checks; E2E-08 ready; status → done |
 | 2026-08-09 02:10 | TASK-24 | subagent-A | cursor-grok-4.5-high | implement | E2E-08 self-mod accept+deny gate |
 | 2026-08-09 02:30 | TASK-24 | Agent A | cursor-grok-4.5-high | implement | E2E-08 gate + test:ci; T7 exit ready; status → review |
+| 2026-08-08 23:44 | TASK-24 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-08/test-ci/fail-closed/sample e2e exit 0; accept-once/deny/INV-SELF spot-checks; T7 exit; status → done |
 
 ---
 
@@ -439,5 +440,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-24 review (E2E-08; Agent B).  
-**Next:** TASK-25 polish + TASK-26 CI.
+**Now:** TASK-25 polish (heartbeat/weekly/soak/E2E-10) + TASK-26 CI.  
+**Next:** T8 exit after TASK-25.
