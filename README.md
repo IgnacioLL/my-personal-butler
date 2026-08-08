@@ -34,7 +34,7 @@ T0 scaffolding is in place; TASK-01 will add invariant runners, fake clock, and 
 ```bash
 ./scripts/test-ci.sh
 # or
-make test:ci
+make test-ci
 ```
 
 The stub exits successfully and prints which layers TASK-01 will wire (unit, contract, integration, INV-*). Once TASK-01 lands, `test:ci` must **fail closed** on broken invariants.
