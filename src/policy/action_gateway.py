@@ -166,7 +166,11 @@ class ActionGateway:
         return self.approvals.accept(approval_id)
 
     def deny(self, approval_id: str) -> Any:
-        return self.approvals.deny(approval_id)
+        item = self.approvals.deny(approval_id)
+        # Keep booking task in sync with approval deny (Android inbox path).
+        if item is not None and getattr(item, "action_type", None) == "book":
+            self._mark_booking_denied(getattr(item, "payload", None) or {})
+        return item
 
     def edit(
         self,
@@ -418,6 +422,15 @@ class ActionGateway:
             return
         try:
             self.bookings.mark_failed(str(task_id), error, at=self.clock.now())
+        except KeyError:
+            return
+
+    def _mark_booking_denied(self, payload: dict[str, Any]) -> None:
+        task_id = (payload or {}).get("booking_task_id")
+        if self.bookings is None or not task_id:
+            return
+        try:
+            self.bookings.mark_denied(str(task_id), at=self.clock.now())
         except KeyError:
             return
 

@@ -2230,9 +2230,8 @@ def _run_booking_integration_checks(root: Path) -> list[dict[str, Any]]:
     )
     denied_prop = svc2.propose_from_utterance(EXPECTED_E2E06_UTTERANCE)
     inbox2 = AndroidApprovalInboxApi(gw2)
+    # Android Deny alone must sync booking task → denied (no manual store glue).
     denied = inbox2.deny(denied_prop.approval_id) if denied_prop.approval_id else None
-    if denied_prop.approval_id:
-        svc2.mark_denied_for_approval(denied_prop.approval_id)
     late = gw2.execute(denied_prop.approval_id) if denied_prop.approval_id else None
     deny_task = svc2.store.get(denied_prop.task_id) if denied_prop.task_id else None
     deny_ok = (
