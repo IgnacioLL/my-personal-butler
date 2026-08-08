@@ -57,7 +57,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Per `testing/roadmap.md` T0 + `harnesses-and-fixtures.md`: `test:ci` pipeline (unit/contract/integration stubs), artifact directory convention, fake clock, INV-* runner skeleton that **fails** on a deliberate broken invariant, outbound message catcher stub.
 - **Acceptance:** `test:ci` runs; deliberate broken INV fails CI; B verifies autonomy process checklist items for scaffolding.
 - **Result:** _(agent)_
@@ -347,6 +347,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 21:46 | TASK-00 | subagent-A | composer-2.5 | implement | First dispatch — bootstrap layout |
 | 2026-08-08 21:50 | TASK-00 | Agent A | composer-2.5 | implement | Bootstrap complete — layout + test:ci stub; status → review |
 | 2026-08-08 21:52 | TASK-00 | Agent B | composer-2.5 | review | PASS — checklist verified; README make target fix; status → done |
+| 2026-08-08 21:53 | TASK-01 | subagent-A | cursor-grok-4.5-high | implement | T0 harness: fake clock, INV runner, fail-closed test:ci |
 
 ---
 
