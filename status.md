@@ -101,7 +101,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** pending
+- **Status:** in_progress
 - **Scope:** Documented/config scaffolding for always-on Gateway per `operations/hosting.md`; backup paths; restart preserves pending approvals (prep for E2E-10). No live VPS required — harness-friendly config.
 - **Acceptance:** Config templates + tests that approval store survives harness restart.
 - **Result:** _(agent)_
