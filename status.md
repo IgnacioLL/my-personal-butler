@@ -145,11 +145,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** TASK-00
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Deterministic router tests w/ stubs per `intelligence/models-and-credits.md`. No live Luna in CI gates.
 - **Acceptance:** Router unit/contract green.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — `make test-ci` / `make test-ci-fail-closed` / `make e2e-01` exit 0. Luna default for ordinary intents; Terra (booking retry, multi-constraint days) and Sol (deep plan, multi-file/policy self-mod, full calendar+diet+travel week) escalation via deterministic rules + stubs. `INV-MODEL-001/002` green; STT stub independent from chat model in integration checks. No live Luna/network in CI gates.
+- **Artifacts:** `src/intelligence/models/{roles,router,stubs,fixtures}.py`, `src/invariants/inv_model_00{1,2}.py`, `fixtures/models/routing-intents.json`, `scripts/run_test_ci.py`, `artifacts/test/task-09/` (runtime; gitignored)
 
 ### TASK-10 — Todos + Android projection API
 - **Phase:** 2 / T2
@@ -372,6 +372,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-08 22:25 | TASK-08 | Agent A | cursor-grok-4.5-high | implement | E2E-01 gate green — VirtualUser + test:ci e2e layer; status → review |
 | 2026-08-08 22:28 | TASK-08 | Agent B | cursor-grok-4.5-high | review | PASS — e2e-01/test-ci/fail-closed exit 0; due+no-hard spot-checks; T1 exit; status → done |
 | 2026-08-08 22:29 | TASK-09 | subagent-A | composer-2.5 | implement | Luna/Terra-Sol models router stubs |
+| 2026-08-08 22:32 | TASK-09 | Agent A | composer-2.5 | implement | Router stubs + INV-MODEL-001/002 + task-09 artifacts; status → review |
 
 ---
 
@@ -393,5 +394,5 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Now:** TASK-09 in_progress (models router).  
-**Next:** TASK-09 Agent B, then TASK-10 todos.
+**Now:** TASK-09 review (models router — Agent B).  
+**Next:** TASK-10 todos.
