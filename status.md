@@ -427,6 +427,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:05 | PROD-wave | planner | — | dispatch | Parallel PROD-01..09 in_progress; cheapest cloud = Oracle Free / Hetzner; full always-on (not stub) |
 | 2026-08-09 00:15 | PROD-08 | Agent A | cursor-grok-4.5-high | implement | Bookings+shopping production skills; hard approve; dry-run+live flags; status → review |
 | 2026-08-09 00:10 | PROD-04 | Agent A | composer-2.5 | implement | OpenClaw skills pack memory/reminders/todos/heartbeat; status → review |
+| 2026-08-09 00:08 | PROD-04 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; skill manifests loadable (not stub); unit.skill_pack.* green; calendar __init__ circular-import fix; status → done |
 | 2026-08-09 00:01 | PROD-02 | Agent A | cursor-grok-4.5-high | implement | Production OpenClaw Codex/Luna + WhatsApp Baileys templates; status → review |
 | 2026-08-09 00:15 | PROD-01 | Agent A | composer-2.5 | implement | Docker compose + deploy runbook + systemd + backup scripts; status → review |
 | 2026-08-09 00:30 | PROD-01 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; prod01 compose/runbook/scripts structurally valid (Oracle+Hetzner); INV-* intact; status → done |
@@ -501,11 +502,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Package production OpenClaw skills under `src/skills/` (or OpenClaw skills dir convention) for memory R/W, reminders/habits, todos, morning brief/weekly review — real skill manifests that Gateway can load, not only Python harness services. Map harness logic → skill interfaces.
 - **Acceptance:** Skills loadable by OpenClaw layout; unit/contract still pass via harness adapters.
-- **Result:** Agent A — Four AgentSkills-compatible skills (`personal-memory`, `reminders-habits`, `personal-todos`, `heartbeat-ops`) with `SKILL.md` + harness-map references; `src/tools/{schemas.json,registry.py,bridge.py}`; `ActionGateway` real adapters for `memory_read`/`memory_update`/`todo_read`/reminder manage/heartbeat tools; `config/openclaw/skills-production.json5` + merge into `config/production/openclaw.skills.snippet.json`; `make test-ci` + `make test-ci-fail-closed` exit 0; unit checks `unit.skill_pack.*`.
-- **Artifacts:** `src/skills/`, `src/tools/`, `config/openclaw/skills-production.json5`, `config/production/openclaw.skills.snippet.json`, `src/policy/{action_gateway,approvals}.py`, `scripts/run_test_ci.py`
+- **Result:** PASS (Agent B review) — Four AgentSkills-compatible skills (`personal-memory`, `reminders-habits`, `personal-todos`, `heartbeat-ops`) with substantive `SKILL.md` frontmatter + harness-map references (not stub-only). `validate_skill_pack()` ok; `unit.skill_pack.{manifests,gateway_memory_read,gateway_todo_read,openclaw_config}` PASS (memory_read returns hot profile, not stub). `make test-ci` exit 0; `make test-ci-fail-closed` exit 0. Review fix: `src/channels/android/ci_checks.py` wired for PROD-05 gates; `capabilities.calendar.__init__` slimmed to break harness circular import. INV-* intact.
+- **Artifacts:** `src/skills/`, `src/tools/`, `config/openclaw/skills-production.json5`, `config/production/openclaw.skills.snippet.json`, `src/policy/{action_gateway,approvals}.py`, `src/channels/android/ci_checks.py`, `scripts/run_test_ci.py`
 
 ### PROD-05 — Android companion + approvals production wiring
 - **Depends on:** —
