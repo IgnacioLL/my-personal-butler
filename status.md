@@ -427,6 +427,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:05 | PROD-wave | planner | — | dispatch | Parallel PROD-01..09 in_progress; cheapest cloud = Oracle Free / Hetzner; full always-on (not stub) |
 | 2026-08-09 00:08 | PROD-09 | Agent A | cursor-grok-4.5-high | implement | Production self-mod allowlist + skill; INV-SELF green; status → review |
 | 2026-08-09 00:15 | PROD-08 | Agent A | cursor-grok-4.5-high | implement | Bookings+shopping production skills; hard approve; dry-run+live flags; status → review |
+| 2026-08-09 00:12 | PROD-08 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; hard approve/caps/freeze/dry-run/CI stubs spot-checks; status → done |
 | 2026-08-09 00:10 | PROD-04 | Agent A | composer-2.5 | implement | OpenClaw skills pack memory/reminders/todos/heartbeat; status → review |
 | 2026-08-09 00:08 | PROD-04 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; skill manifests loadable (not stub); unit.skill_pack.* green; calendar __init__ circular-import fix; status → done |
 | 2026-08-09 00:01 | PROD-02 | Agent A | cursor-grok-4.5-high | implement | Production OpenClaw Codex/Luna + WhatsApp Baileys templates; status → review |
@@ -544,11 +545,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Production Booksy-class browser skill config + shopping merchant adapters behind hard approve, caps, freeze; dry-run default with live flag documented. Stub portal remains CI-only.
 - **Acceptance:** Production skill configs + safety flags; INV-BOOK/PAY still gate CI.
-- **Result:** PASS (Agent A implement) — Production configs + OpenClaw skills for bookings/shopping behind hard approve; spend caps + freeze spending; dry-run default with `BOOKINGS_LIVE` / `SHOPPING_LIVE` (both required for live; CI forced dry-run). Stub portal + dry-run merchant remain CI-only. Aligned `agent-plan/capabilities/{bookings,shopping}.md`. INV-BOOK/PAY still CI gates. Ready for Agent B.
-- **Artifacts:** `config/production/{bookings,shopping,openclaw.skills.snippet}.json`, `config/bookings.harness.json`, `src/skills/{bookings,shopping}/SKILL.md`, `src/capabilities/{bookings,shopping}/production.py`, `docs/bookings-shopping-production.md`, `artifacts/test/prod-08/`
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: hard approve mandatory for `book`/`buy`; dry-run default (`mode=dry_run`); env-alone or mode-alone stay dry-run; both flags → live; `CI=1` forces dry-run; shopping caps 50/150 + freeze_spending honored; harness stub portal + dry-run merchant + fixtures intact; `unit.booking.prod08_production_config` + `unit.shopping.prod08_production_config` PASS; `INV-BOOK-001/002` + `INV-PAY-001/002` PASS. Fail-closed does not stomp prod-08 verification (still PASS). INV-* intact (no weaken). No code fixes required.
+- **Artifacts:** `config/production/{bookings,shopping,openclaw.skills.snippet}.json`, `config/bookings.harness.json`, `config/shopping.harness.json`, `src/skills/{bookings,shopping}/SKILL.md`, `src/capabilities/{bookings,shopping}/production.py`, `docs/bookings-shopping-production.md`, `artifacts/test/prod-08/`
 
 ### PROD-09 — Self-mod production path + allowlist for this repo
 - **Depends on:** —
