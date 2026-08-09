@@ -18,7 +18,15 @@ require_cmd() {
 }
 
 require_cmd docker
-docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 required (docker compose version)"
+
+# Docker Compose v2 may be installed as either the Docker CLI plugin
+# (`docker compose`) or the standalone binary (`docker-compose`).
+COMPOSE_CMD=(docker compose)
+if ! docker compose version >/dev/null 2>&1; then
+  command -v docker-compose >/dev/null 2>&1 || fail "Docker Compose v2 required (docker compose or docker-compose)"
+  docker-compose version >/dev/null 2>&1 || fail "Docker Compose v2 required (docker compose or docker-compose)"
+  COMPOSE_CMD=(docker-compose)
+fi
 
 if [[ ! -f .env ]]; then
   if [[ -f .env.example ]]; then
@@ -60,20 +68,20 @@ docker pull "${IMAGE}"
 
 echo "==> onboarding (official OpenClaw flow via gateway container)"
 # Mirrors openclaw/openclaw scripts/docker/setup.sh pre-start onboarding.
-docker compose run --rm --no-deps --entrypoint node openclaw-gateway \
+"${COMPOSE_CMD[@]}" run --rm --no-deps --entrypoint node openclaw-gateway \
   dist/index.js onboard --mode local --no-install-daemon || {
     echo "==> onboard may have partially completed; continuing"
   }
 
 echo "==> applying gateway mode and bind"
-docker compose run --rm --no-deps --entrypoint node openclaw-gateway \
+"${COMPOSE_CMD[@]}" run --rm --no-deps --entrypoint node openclaw-gateway \
   dist/index.js config set gateway.mode local || true
-docker compose run --rm --no-deps --entrypoint node openclaw-gateway \
+"${COMPOSE_CMD[@]}" run --rm --no-deps --entrypoint node openclaw-gateway \
   dist/index.js config set gateway.bind lan || true
 # Control UI allowedOrigins: set during onboard or via docs/deploy.md if SSH tunnel fails CORS.
 
 echo "==> starting gateway (restart: unless-stopped)"
-docker compose up -d openclaw-gateway
+"${COMPOSE_CMD[@]}" up -d openclaw-gateway
 
 echo ""
 echo "==> Gateway starting. Next steps:"
