@@ -7,7 +7,7 @@ Default ``live=False`` shapes API payloads and updates the local mirror store
 without calling Google. Operator sets ``CALENDAR_LIVE=1`` (or config live: true)
 after OAuth secrets are filled.
 
-Never commit real client secrets or refresh tokens — use config/calendar.example.env.
+Never commit real client secrets or refresh tokens — use config/production/calendar.env.example.
 """
 
 from __future__ import annotations
@@ -639,7 +639,7 @@ class GoogleCalendarAdapter:
         if not self.config.configured and not self._access_token:
             raise GoogleCalendarError(
                 "missing_oauth_credentials: set GOOGLE_CALENDAR_CLIENT_ID/"
-                "CLIENT_SECRET/REFRESH_TOKEN (see config/calendar.example.env)"
+                "CLIENT_SECRET/REFRESH_TOKEN (see config/production/calendar.env.example)"
             )
         if self._access_token and not self.config.refresh_token:
             return self._access_token

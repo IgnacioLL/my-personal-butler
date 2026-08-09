@@ -1,0 +1,5 @@
+{
+  "mode": "memory",
+  "live": false,
+  "description": "Harness/CI in-memory calendar (PROD-06). Soft-confirm writes via ActionGateway."
+}

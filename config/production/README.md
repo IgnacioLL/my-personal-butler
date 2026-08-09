@@ -36,9 +36,13 @@ Docs: [`docs/production-voice.md`](../../docs/production-voice.md) · plan: [`ag
 | [`call-mode.policy.json`](./call-mode.policy.json) | PROD-07 | Call-mode tool allowlist |
 | [`bookings.json`](./bookings.json) | PROD-08 | Booksy-class browser skill (hard approve; dry-run; `BOOKINGS_LIVE`) |
 | [`shopping.json`](./shopping.json) | PROD-08 | Merchant adapters (hard approve; caps; freeze; dry-run; `SHOPPING_LIVE`) |
+| [`calendar.json`](./calendar.json) | PROD-06 | Google Calendar (soft confirm; dry-run; `CALENDAR_LIVE`) |
+| [`calendar.env.example`](./calendar.env.example) | PROD-06 | Google OAuth secrets template |
 | [`openclaw.skills.snippet.json`](./openclaw.skills.snippet.json) | PROD-08 | Bookings + shopping `skills.entries` merge fragment |
 
 Bookings/shopping operator runbook: [`docs/bookings-shopping-production.md`](../../docs/bookings-shopping-production.md). Stub portal / dry-run merchant remain CI-only (`INV-BOOK-*`, `INV-PAY-*`).
+
+Google Calendar runbook: [`docs/calendar-production.md`](../../docs/calendar-production.md). In-memory stub remains CI-only (`INV-APPR-003`).
 
 Full Codex/Luna + WhatsApp allowlist profile: [`../openclaw/`](../openclaw/).
 PROD-04 memory/reminders/todos/heartbeat pack: [`../openclaw/skills-production.json5`](../openclaw/skills-production.json5).

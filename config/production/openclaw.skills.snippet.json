@@ -44,6 +44,20 @@
         "env": {
           "SHOPPING_LIVE": "0"
         }
+      },
+      "calendar": {
+        "enabled": false,
+        "config": {
+          "productionConfig": "./config/production/calendar.json",
+          "harnessConfig": "./config/calendar.harness.json",
+          "mode": "google",
+          "approvalTier": "soft_confirm",
+          "ciMemoryAdapterOnly": true
+        },
+        "env": {
+          "CALENDAR_LIVE": "0",
+          "CALENDAR_MODE": "google"
+        }
       }
     }
   },

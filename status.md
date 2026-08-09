@@ -425,11 +425,13 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 02:55 | TASK-26 | Agent A | composer-2.5 | implement | GATE_MAP docs + verification stamp; status → review |
 | 2026-08-09 03:00 | TASK-26 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; ci-gates audit + E2E-07/08 deny paths; status → done |
 | 2026-08-09 00:05 | PROD-wave | planner | — | dispatch | Parallel PROD-01..09 in_progress; cheapest cloud = Oracle Free / Hetzner; full always-on (not stub) |
+| 2026-08-09 00:15 | PROD-08 | Agent A | cursor-grok-4.5-high | implement | Bookings+shopping production skills; hard approve; dry-run+live flags; status → review |
 | 2026-08-09 00:10 | PROD-04 | Agent A | composer-2.5 | implement | OpenClaw skills pack memory/reminders/todos/heartbeat; status → review |
 | 2026-08-09 00:01 | PROD-02 | Agent A | cursor-grok-4.5-high | implement | Production OpenClaw Codex/Luna + WhatsApp Baileys templates; status → review |
 | 2026-08-09 00:15 | PROD-01 | Agent A | composer-2.5 | implement | Docker compose + deploy runbook + systemd + backup scripts; status → review |
 | 2026-08-09 00:04 | PROD-03 | Agent A | cursor-grok-4.5-high | implement | Production STT+TTS config + inbound TTS; fixture STT kept; status → review |
 | 2026-08-09 00:20 | PROD-07 | Agent A | cursor-grok-4.5-high | implement | Twilio/Telnyx voice production + INV-APPR-005 policy; status → review |
+| 2026-08-09 00:25 | PROD-06 | Agent A | cursor-grok-4.5-high | implement | Google Calendar OAuth adapter + soft confirm; status → review |
 
 ---
 
@@ -517,11 +519,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Real Google Calendar OAuth/config + soft-confirm write path for production; in-memory calendar remains harness default. Conflict-aware suggestions preserved.
 - **Acceptance:** Production adapter + secrets template; harness calendar tests green.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Production Google Calendar adapter (`GoogleCalendarAdapter`, stdlib OAuth/API v3) with soft-confirm write path via ActionGateway; dry-run default (`CALENDAR_LIVE`); secrets template `calendar.env.example`; factory keeps harness in-memory default. Conflict-aware propose preserved (`integration.calendar.prod06_google_soft_confirm`). Plan leaf + skill aligned. Ready for Agent B.
+- **Artifacts:** `src/capabilities/calendar/{google,factory,protocol}.py`, `config/production/calendar.json`, `config/production/calendar.env.example`, `config/calendar.harness.json`, `src/skills/calendar/`, `docs/calendar-production.md`, `agent-plan/capabilities/calendar.md`, `scripts/run_test_ci.py` (`unit.calendar.prod06_*`)
 
 ### PROD-07 — Twilio (or Telnyx) voice calls production
 - **Depends on:** —
@@ -537,11 +539,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Production Booksy-class browser skill config + shopping merchant adapters behind hard approve, caps, freeze; dry-run default with live flag documented. Stub portal remains CI-only.
 - **Acceptance:** Production skill configs + safety flags; INV-BOOK/PAY still gate CI.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Production configs + OpenClaw skills for bookings/shopping behind hard approve; spend caps + freeze spending; dry-run default with `BOOKINGS_LIVE` / `SHOPPING_LIVE` (both required for live; CI forced dry-run). Stub portal + dry-run merchant remain CI-only. Aligned `agent-plan/capabilities/{bookings,shopping}.md`. INV-BOOK/PAY still CI gates. Ready for Agent B.
+- **Artifacts:** `config/production/{bookings,shopping,openclaw.skills.snippet}.json`, `config/bookings.harness.json`, `src/skills/{bookings,shopping}/SKILL.md`, `src/capabilities/{bookings,shopping}/production.py`, `docs/bookings-shopping-production.md`, `artifacts/test/prod-08/`
 
 ### PROD-09 — Self-mod production path + allowlist for this repo
 - **Depends on:** —

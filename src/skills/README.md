@@ -12,6 +12,7 @@ Harness CI exercises the same behavior via `src/capabilities/*`, `src/intelligen
 | Reminders & habits | [`reminders-habits/`](./reminders-habits/) | `reminder_create`, `habit_create`, `reminder_list`, `reminder_snooze`, `reminder_cancel` |
 | Todos | [`personal-todos/`](./personal-todos/) | `todo_add`, `todo_complete`, `todo_read`, `todo_cancel` |
 | Heartbeat | [`heartbeat-ops/`](./heartbeat-ops/) | `heartbeat_morning_brief`, `heartbeat_weekly_review` |
+| Calendar | [`calendar/`](./calendar/) | `calendar_read`, `calendar_create`, `calendar_modify`, `calendar_cancel` (PROD-06; soft confirm) |
 
 Tool JSON schemas: [`../tools/schemas.json`](../tools/schemas.json). Registry: [`../tools/registry.py`](../tools/registry.py).
 
@@ -85,6 +86,7 @@ openclaw skills list
 | --- | --- |
 | Auto | `memory_read`, `todo_*`, `reminder_*`, `habit_create`, heartbeat tools |
 | Soft confirm | `memory_update` (propose → Accept → execute) |
+| Soft confirm | `calendar_create` / `calendar_modify` / `calendar_cancel` (PROD-06) |
 
 ## Harness mapping
 
@@ -94,6 +96,7 @@ openclaw skills list
 | Reminders | `src/capabilities/reminders/` |
 | Todos | `src/capabilities/todos/` |
 | Heartbeat | `src/operations/heartbeat.py` |
+| Calendar | `src/capabilities/calendar/` (Google production + in-memory harness) |
 | Gateway gates | `src/policy/action_gateway.py` |
 | CI checks | `scripts/run_test_ci.py` (`integration.memory.*`, `unit.reminder.*`, …) |
 
