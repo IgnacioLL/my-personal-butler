@@ -250,7 +250,7 @@ Placeholders only. Copy `*.env.example` → `*.local.env` (gitignored). Never co
 | Google OAuth client + refresh token | [`config/production/calendar.env.example`](../config/production/calendar.env.example) | **Free** GCP project + API quota | Calendar writes |
 | `TWILIO_*` or `TELNYX_*` | [`config/production/voice-call.env.example`](../config/production/voice-call.env.example) | Account + **purchased number** + usage | Outbound voice calls only |
 | Booksy / merchant logins | operator browser profile | Existing accounts (no template) | Bookings / shopping browsers |
-| Optional TTS fallbacks | `voice.env.example` | API if enabled | ElevenLabs / MiniMax |
+| Optional TTS fallbacks | [`config/production/voice.env.example`](../config/production/voice.env.example) | API if enabled | ElevenLabs / MiniMax |
 
 **Not secrets (versioned config):** everything under [`config/openclaw/`](../config/openclaw/), [`config/production/*.json`](../config/production/), [`config/selfmod.*.production.json`](../config/).
 

@@ -443,7 +443,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:08 | PROD-09 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; real-repo allowlist/hard-approve/freeze/INV-SELF spot-checks; status → done |
 | 2026-08-09 00:25 | PROD-05 | Agent A | cursor-grok-4.5-high | implement | Android pairing + control plane config; status → review |
 | 2026-08-09 00:12 | PROD-05 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; pairing/config/Status/self-mod card spot-checks; status → done |
-| 2026-08-09 00:12 | PROD-10 | Agent A | composer-2.5 | implement | Operator go-live checklist + secrets inventory; status → review |
+| 2026-08-09 00:12 | PROD-10 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; ordered enablement/secrets/cost/deploy.md spot-checks; secrets path fix; status → done |
 
 ---
 
@@ -466,9 +466,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Wave PROD (full always-on app — not stubs):** parallel finish for real OpenClaw Gateway deploy + production channel/skill wiring. Harness CI stays green; production path is first-class.
-
-**Cheapest cloud deploy (answered):** Oracle Cloud Always Free ARM VM if available, else Hetzner CX22-class VPS (~€4–5/mo). Always-on Docker/systemd OpenClaw Gateway; persist `~/.openclaw`; Luna via Codex subscription. Not serverless.
+**PROD wave complete** — all PROD-01..10 done. Operator path: [`docs/go-live.md`](docs/go-live.md) (ordered enablement + secrets + cost) after [`docs/deploy.md`](docs/deploy.md). Harness CI stays green on mocks; production config under `config/` and `deploy/`.
 
 ---
 
@@ -571,10 +569,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** PROD-01 (soft)
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Single `docs/go-live.md`: ordered enablement WhatsApp→STT→Android→Calendar→Calls→Book/Buy→Self-mod; secrets inventory (Codex, STT, Twilio, Google, etc.); cost expectations; what must be purchased vs subscription.
 - **Acceptance:** One doc an operator can follow end-to-end on phone.
-- **Result:** Agent A — Single operator doc `docs/go-live.md`: step 0 VPS (links `deploy.md` Oracle Free / Hetzner); ordered enablement steps 1–7 with checkboxes; secrets inventory table (placeholders only, subscription vs purchase vs API); cost expectations; production config index under `config/`; final cross-layer smoke + `make test-ci` reminder. Ready for Agent B.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: ordered steps 0–7 (WhatsApp→STT→Android→Calendar→Calls→Book/Buy→Self-mod) with PROD-04 skills merge at step 1; secrets inventory (subscription vs API vs purchase) + cost table; `deploy.md` links/anchors valid (provision + HTTPS); referenced config/runbook paths exist; INV-* references intact (`INV-APPR-005`, `INV-BOOK-*`, `INV-PAY-*`, `INV-SELF`). Review fix: full path for optional TTS fallback in secrets table. No INV weaken.
 - **Artifacts:** `docs/go-live.md`, `status.md`
 
 ---
