@@ -568,10 +568,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** PROD-01 (soft)
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** queued
+- **Status:** review
 - **Scope:** Single `docs/go-live.md`: ordered enablement WhatsApp→STT→Android→Calendar→Calls→Book/Buy→Self-mod; secrets inventory (Codex, STT, Twilio, Google, etc.); cost expectations; what must be purchased vs subscription.
 - **Acceptance:** One doc an operator can follow end-to-end on phone.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Agent A — Single operator doc `docs/go-live.md`: step 0 VPS (links `deploy.md` Oracle Free / Hetzner); ordered enablement steps 1–7 with checkboxes; secrets inventory table (placeholders only, subscription vs purchase vs API); cost expectations; production config index under `config/`; final cross-layer smoke + `make test-ci` reminder. Ready for Agent B.
+- **Artifacts:** `docs/go-live.md`, `status.md`
 
 ---
