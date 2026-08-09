@@ -507,11 +507,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Production pairing docs + config for OpenClaw Android node: todos sync, approval inbox (Accept/Deny/Edit), kill switches on Status screen, self-mod approval cards. Full always-on control plane — not API doubles alone.
 - **Acceptance:** Operator checklist to pair phone; config templates; CI doubles remain for gate tests.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Agent A — Production pairing runbook + operator checklist (`docs/android-pairing.md`); `config/android.example.yaml` (todos, Accept/Deny/Edit inbox, Status kill switches, self-mod cards); `config/android.harness.json` keeps CI doubles; `AndroidStatusApi` + self-mod card badges on inbox projection; plan leaf aligned. Unit checks `unit.android_status.*`, `unit.android.prod05_*`, `unit.android_approval.self_mod_card_fields`. Ready for Agent B.
+- **Artifacts:** `docs/android-pairing.md`, `config/android.example.yaml`, `config/android.harness.json`, `config/gateway.example.yaml`, `config/backup.example.json`, `config/README.md`, `agent-plan/channels/{android-companion,index}.md`, `agent-plan/operations/hosting.md`, `src/channels/android/{status,approvals,projection,__init__}.py`, `scripts/run_test_ci.py`
 
 ### PROD-06 — Google Calendar production adapter (soft confirm)
 - **Depends on:** —

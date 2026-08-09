@@ -16,11 +16,18 @@ Placeholders for OpenClaw Gateway and harness profiles. **Do not commit secrets.
 | [`selfmod.harness.json`](./selfmod.harness.json) | Self-mod fixture workspace (TASK-23 / INV-SELF-*) |
 | [`production/bookings.json`](./production/bookings.json) | Production Booksy-class browser skill (hard approve; dry-run default; `BOOKINGS_LIVE`) |
 | [`production/shopping.json`](./production/shopping.json) | Production merchant adapters (hard approve; caps; freeze; dry-run default; `SHOPPING_LIVE`) |
+| [`production/calendar.json`](./production/calendar.json) | Production Google Calendar adapter (soft confirm; dry-run default; `CALENDAR_LIVE`) |
+| [`production/calendar.env.example`](./production/calendar.env.example) | Google OAuth secrets template — copy to `calendar.local.env` |
+| [`calendar.harness.json`](./calendar.harness.json) | In-memory calendar harness (CI / INV-APPR-003 / E2E-04) |
 | [`production/openclaw.skills.snippet.json`](./production/openclaw.skills.snippet.json) | Merge into OpenClaw `skills` — bookings + shopping entries |
 | [`backup.example.json`](./backup.example.json) | Backup/restore path manifest (config + memory + approvals) |
 | [`harness.example.env`](./harness.example.env) | Virtual User / CI harness flags — copy to `harness.local.env` |
 
 Production WhatsApp QR login + Codex auth: [`openclaw/README.md`](./openclaw/README.md).
+
+Android companion pairing (PROD-05): [`../docs/android-pairing.md`](../docs/android-pairing.md) — merge `android.example.yaml` for live node; CI keeps `android.harness.json` doubles.
+
+Google Calendar (PROD-06): [`../docs/calendar-production.md`](../docs/calendar-production.md) — OAuth + soft confirm; CI keeps in-memory stub.
 
 Production WhatsApp voice STT + inbound TTS (PROD-03): [`production/README.md`](./production/README.md) · [`../docs/production-voice.md`](../docs/production-voice.md). Harness CI keeps fixture STT.
 

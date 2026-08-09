@@ -90,6 +90,11 @@ from capabilities.calendar.service import CalendarService  # noqa: E402
 from capabilities.calendar.store import CalendarStore  # noqa: E402
 from capabilities.bookings.parse import looks_like_booking, parse_booking  # noqa: E402
 from capabilities.bookings.portal import StubBooksyPortal  # noqa: E402
+from capabilities.bookings.production import (  # noqa: E402
+    BookingProductionConfig,
+    load_booking_harness_config,
+    load_booking_production_config,
+)
 from capabilities.bookings.service import BookingService  # noqa: E402
 from capabilities.bookings.store import BookingStatus, BookingStore  # noqa: E402
 from capabilities.diet.constraints import banned_terms, check_meal_plan, text_violations  # noqa: E402
@@ -101,6 +106,11 @@ from capabilities.shopping.parse import (  # noqa: E402
     EXPECTED_E2E07_UTTERANCE,
     looks_like_shopping,
     parse_shopping,
+)
+from capabilities.shopping.production import (  # noqa: E402
+    ShoppingProductionConfig,
+    load_shopping_harness_config,
+    load_shopping_production_config,
 )
 from capabilities.shopping.service import ShoppingService  # noqa: E402
 from capabilities.shopping.store import PurchaseStatus  # noqa: E402
@@ -1919,123 +1929,8 @@ def _run_calendar_unit_checks(root: Path) -> list[dict[str, Any]]:
         }
     )
 
-    checks.extend(_run_prod_06_calendar_unit_checks(root))
     return checks
 
-
-def _run_prod_06_calendar_unit_checks(root: Path) -> list[dict[str, Any]]:
-    """PROD-06: Google production adapter + factory; harness stays in-memory."""
-    checks: list[dict[str, Any]] = []
-    try:
-        profile = load_calendar_profile(root=root, env={})
-        adapter = build_calendar_adapter(profile, root=root, env={})
-        harness_ok = (
-            profile.mode == "memory"
-            and isinstance(adapter, StubCalendarAdapter)
-            and (root / "config" / "calendar.harness.json").is_file()
-            and (root / "config" / "production" / "calendar.json").is_file()
-            and (root / "config" / "production" / "calendar.env.example").is_file()
-            and (root / "src" / "skills" / "calendar" / "SKILL.md").is_file()
-            and (root / "docs" / "calendar-production.md").is_file()
-        )
-        checks.append(
-            {
-                "id": "unit.calendar.prod06_factory_harness_default",
-                "result": "PASS" if harness_ok else "FAIL",
-                "detail": (
-                    f"mode={profile.mode} adapter={type(adapter).__name__} "
-                    f"harness={harness_ok}"
-                ),
-            }
-        )
-
-        prod_cfg = load_google_calendar_config(
-            env={},
-            config_path=root / "config" / "production" / "calendar.json",
-        )
-        google_profile = load_calendar_profile(
-            root / "config" / "production" / "calendar.json",
-            env={"CALENDAR_MODE": "google"},
-            root=root,
-        )
-        google_adapter = build_calendar_adapter(
-            google_profile, root=root, env={"CALENDAR_MODE": "google"}
-        )
-        secrets = (root / "config" / "production" / "calendar.env.example").read_text(
-            encoding="utf-8"
-        )
-        prod_ok = (
-            isinstance(google_adapter, GoogleCalendarAdapter)
-            and google_profile.mode == "google"
-            and prod_cfg.live is False
-            and google_adapter.live is False
-            and "GOOGLE_CALENDAR_CLIENT_SECRET" in secrets
-            and "CALENDAR_LIVE" in secrets
-            and "never commit" in secrets.lower()
-            or "Never commit" in secrets
-        )
-        # Fix boolean precedence: secrets check grouped.
-        prod_ok = (
-            isinstance(google_adapter, GoogleCalendarAdapter)
-            and google_profile.mode == "google"
-            and prod_cfg.live is False
-            and google_adapter.live is False
-            and "GOOGLE_CALENDAR_CLIENT_SECRET" in secrets
-            and "CALENDAR_LIVE" in secrets
-            and ("never commit" in secrets.lower())
-        )
-        checks.append(
-            {
-                "id": "unit.calendar.prod06_google_config_dry_run",
-                "result": "PASS" if prod_ok else "FAIL",
-                "detail": (
-                    f"mode={google_profile.mode} live={google_adapter.live} "
-                    f"configured={prod_cfg.configured} "
-                    f"public={prod_cfg.to_public_dict()}"
-                ),
-            }
-        )
-
-        # Dry-run create shapes Google payload; no network; increments create_count.
-        dry = GoogleCalendarAdapter(
-            config=GoogleCalendarConfig(live=False, calendar_id="primary", timezone="UTC")
-        )
-        created = dry.create(
-            {
-                "title": "Focus block",
-                "start": "2026-01-09T09:00:00+01:00",
-                "end": "2026-01-09T11:00:00+01:00",
-                "timezone": "Europe/Madrid",
-            }
-        )
-        dry_ok = (
-            dry.create_count == 1
-            and created.get("provider") == "google"
-            and created.get("live") is False
-            and len(dry.http_calls) == 1
-            and dry.http_calls[0].get("method") == "POST"
-            and dry.http_calls[0].get("live") is False
-            and (dry.http_calls[0].get("body") or {}).get("summary") == "Focus block"
-        )
-        checks.append(
-            {
-                "id": "unit.calendar.prod06_google_dry_run_create",
-                "result": "PASS" if dry_ok else "FAIL",
-                "detail": (
-                    f"create={dry.create_count} calls={dry.http_calls} "
-                    f"event={created.get('id')}"
-                ),
-            }
-        )
-    except Exception as exc:  # noqa: BLE001
-        checks.append(
-            {
-                "id": "unit.calendar.prod06_factory_harness_default",
-                "result": "FAIL",
-                "detail": f"error:{exc}",
-            }
-        )
-    return checks
 
 
 def _run_calendar_integration_checks(root: Path) -> list[dict[str, Any]]:
@@ -2518,6 +2413,60 @@ def _run_booking_unit_checks(root: Path) -> list[dict[str, Any]]:
         }
     )
 
+    # PROD-08: production Booksy skill config — dry-run default; live gated.
+    checks.extend(_run_prod_08_booking_unit_checks(root))
+
+    return checks
+
+
+
+def _run_prod_08_booking_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Production bookings config + skill smoke (stub portal remains CI path)."""
+    checks: list[dict[str, Any]] = []
+    try:
+        prod = load_booking_production_config()
+        harness = load_booking_harness_config()
+        skill_md = root / "src" / "skills" / "bookings" / "SKILL.md"
+        default_mode = prod.resolve_execute_mode(env={})
+        live_both = prod.resolve_execute_mode(env={prod.live_flag.env: "1"})
+        live_forced = BookingProductionConfig.from_dict({**prod.raw, "mode": "live"})
+        live_ok = live_forced.resolve_execute_mode(env={prod.live_flag.env: "1"})
+        ci_safe = live_forced.resolve_execute_mode(
+            env={prod.live_flag.env: "1", "CI": "1"}
+        )
+        live_forced.assert_ci_safe(env={prod.live_flag.env: "1", "CI": "1"})
+        ok = (
+            prod.hard_approve_mandatory()
+            and prod.mode == "dry_run"
+            and default_mode == "dry_run"
+            and live_both == "dry_run"
+            and live_ok == "live"
+            and ci_safe == "dry_run"
+            and harness.get("live_forbidden") is True
+            and harness.get("mode") == "stub_portal"
+            and skill_md.is_file()
+            and "hard approve" in skill_md.read_text(encoding="utf-8").lower()
+            and (root / "docs" / "bookings-shopping-production.md").is_file()
+        )
+        checks.append(
+            {
+                "id": "unit.booking.prod08_production_config",
+                "result": "PASS" if ok else "FAIL",
+                "detail": (
+                    f"mode={prod.mode} default={default_mode} "
+                    f"env_alone={live_both} both={live_ok} ci={ci_safe} "
+                    f"hard={prod.hard_approve_mandatory()} skill={skill_md.is_file()}"
+                ),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(
+            {
+                "id": "unit.booking.prod08_production_config",
+                "result": "FAIL",
+                "detail": f"error:{exc}",
+            }
+        )
     return checks
 
 
@@ -2877,6 +2826,65 @@ def _run_shopping_unit_checks(root: Path) -> list[dict[str, Any]]:
         }
     )
 
+    # PROD-08: production shopping config — dry-run default; caps + freeze + live gate.
+    checks.extend(_run_prod_08_shopping_unit_checks(root))
+
+    return checks
+
+
+
+def _run_prod_08_shopping_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Production shopping config + skill smoke (dry-run merchant remains CI path)."""
+    checks: list[dict[str, Any]] = []
+    try:
+        prod = load_shopping_production_config()
+        harness = load_shopping_harness_config()
+        skill_md = root / "src" / "skills" / "shopping" / "SKILL.md"
+        default_mode = prod.resolve_execute_mode(env={})
+        live_forced = ShoppingProductionConfig.from_dict({**prod.raw, "mode": "live"})
+        live_ok = live_forced.resolve_execute_mode(env={prod.live_flag.env: "1"})
+        env_alone = prod.resolve_execute_mode(env={prod.live_flag.env: "1"})
+        ci_safe = live_forced.resolve_execute_mode(
+            env={prod.live_flag.env: "1", "CI": "1"}
+        )
+        live_forced.assert_ci_safe(env={prod.live_flag.env: "1", "CI": "1"})
+        ok = (
+            prod.hard_approve_mandatory()
+            and prod.freeze_spending_honored()
+            and prod.mode == "dry_run"
+            and prod.adapter_default == "dry_run"
+            and prod.spend_caps.daily_limit == 50.0
+            and prod.spend_caps.weekly_limit == 150.0
+            and default_mode == "dry_run"
+            and env_alone == "dry_run"
+            and live_ok == "live"
+            and ci_safe == "dry_run"
+            and harness.get("mode") == "dry_run"
+            and harness.get("live_forbidden") is True
+            and skill_md.is_file()
+            and "freeze" in skill_md.read_text(encoding="utf-8").lower()
+            and (root / "config" / "production" / "openclaw.skills.snippet.json").is_file()
+        )
+        checks.append(
+            {
+                "id": "unit.shopping.prod08_production_config",
+                "result": "PASS" if ok else "FAIL",
+                "detail": (
+                    f"mode={prod.mode} default={default_mode} "
+                    f"env_alone={env_alone} both={live_ok} ci={ci_safe} "
+                    f"caps={prod.spend_caps.daily_limit}/{prod.spend_caps.weekly_limit} "
+                    f"freeze={prod.freeze_spending_honored()} skill={skill_md.is_file()}"
+                ),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(
+            {
+                "id": "unit.shopping.prod08_production_config",
+                "result": "FAIL",
+                "detail": f"error:{exc}",
+            }
+        )
     return checks
 
 
@@ -3680,6 +3688,154 @@ def _run_android_approval_unit_checks() -> list[dict[str, Any]]:
         }
     )
 
+    return checks
+
+
+
+def _run_android_status_unit_checks() -> list[dict[str, Any]]:
+    """Android Status screen: kill switches + pending/open counts (PROD-05 surface)."""
+    checks: list[dict[str, Any]] = []
+    clock = FakeClock()
+    gw = ActionGateway(clock=clock)
+    status = AndroidStatusApi(gw)
+
+    baseline = status.get()
+    base_ok = (
+        baseline.gateway_online
+        and baseline.paired
+        and not baseline.agent_paused
+        and not baseline.spend_frozen
+        and not baseline.self_mod_frozen
+        and baseline.pending_approvals == 0
+    )
+    checks.append(
+        {
+            "id": "unit.android_status.baseline",
+            "result": "PASS" if base_ok else "FAIL",
+            "detail": f"snap={baseline.to_dict()}",
+        }
+    )
+
+    paused = status.pause_agent()
+    resumed = status.resume_agent()
+    pause_ok = paused.agent_paused and not resumed.agent_paused
+    checks.append(
+        {
+            "id": "unit.android_status.pause_resume",
+            "result": "PASS" if pause_ok else "FAIL",
+            "detail": f"paused={paused.agent_paused} resumed={resumed.agent_paused}",
+        }
+    )
+
+    spend = status.freeze_spending()
+    unspend = status.unfreeze_spending()
+    spend_ok = spend.spend_frozen and not unspend.spend_frozen
+    checks.append(
+        {
+            "id": "unit.android_status.freeze_spending",
+            "result": "PASS" if spend_ok else "FAIL",
+            "detail": f"frozen={spend.spend_frozen} unfrozen={unspend.spend_frozen}",
+        }
+    )
+
+    sm = status.freeze_self_mod()
+    unsm = status.unfreeze_self_mod()
+    sm_ok = sm.self_mod_frozen and not unsm.self_mod_frozen
+    checks.append(
+        {
+            "id": "unit.android_status.freeze_self_mod",
+            "result": "PASS" if sm_ok else "FAIL",
+            "detail": f"frozen={sm.self_mod_frozen} unfrozen={unsm.self_mod_frozen}",
+        }
+    )
+
+    prop = gw.propose(
+        "calendar_create",
+        "Status pending probe",
+        {
+            "title": "Status pending probe",
+            "start": "2026-01-09T09:00:00+01:00",
+            "end": "2026-01-09T10:00:00+01:00",
+        },
+    )
+    after_prop = status.get()
+    cancelled_status, cancelled_ids = status.cancel_pending()
+    cancel_ok = (
+        prop.ok
+        and after_prop.pending_approvals >= 1
+        and cancelled_status.pending_approvals == 0
+        and prop.approval_id in cancelled_ids
+    )
+    checks.append(
+        {
+            "id": "unit.android_status.cancel_pending",
+            "result": "PASS" if cancel_ok else "FAIL",
+            "detail": (
+                f"pending_before={after_prop.pending_approvals} "
+                f"pending_after={cancelled_status.pending_approvals} "
+                f"cancelled={len(cancelled_ids)}"
+            ),
+        }
+    )
+
+    return checks
+
+
+def _run_prod05_android_config_checks(root: Path) -> list[dict[str, Any]]:
+    """PROD-05 config templates + Status API module present (CI doubles stay)."""
+    checks: list[dict[str, Any]] = []
+    example = root / "config" / "android.example.yaml"
+    harness = root / "config" / "android.harness.json"
+    pairing = root / "docs" / "android-pairing.md"
+    status_mod = root / "src" / "channels" / "android" / "status.py"
+
+    files_ok = all(p.is_file() for p in (example, harness, pairing, status_mod))
+    checks.append(
+        {
+            "id": "unit.android.prod05_files",
+            "result": "PASS" if files_ok else "FAIL",
+            "detail": (
+                f"example={example.is_file()} harness={harness.is_file()} "
+                f"pairing={pairing.is_file()} status={status_mod.is_file()}"
+            ),
+        }
+    )
+
+    try:
+        harness_data = json.loads(harness.read_text(encoding="utf-8"))
+        doubles = dict(harness_data.get("doubles") or {})
+        features = dict(harness_data.get("features") or {})
+        harness_ok = (
+            doubles.get("status") == "channels.android.status.AndroidStatusApi"
+            and doubles.get("approvals")
+            == "channels.android.approvals.AndroidApprovalInboxApi"
+            and features.get("status_kill_switches") is True
+            and features.get("self_mod_cards") is True
+        )
+        example_text = example.read_text(encoding="utf-8")
+        example_ok = (
+            "freeze_self_mod" in example_text
+            and "self_mod_cards" in example_text
+            and "kill_switches" in example_text
+            and "accept" in example_text
+        )
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        checks.append(
+            {
+                "id": "unit.android.prod05_config_shape",
+                "result": "FAIL",
+                "detail": f"parse_error:{exc}",
+            }
+        )
+        return checks
+
+    checks.append(
+        {
+            "id": "unit.android.prod05_config_shape",
+            "result": "PASS" if (harness_ok and example_ok) else "FAIL",
+            "detail": f"harness_ok={harness_ok} example_ok={example_ok}",
+        }
+    )
     return checks
 
 
@@ -7316,6 +7472,149 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
             + "\n",
             encoding="utf-8",
         )
+
+
+    # PROD-08 — bookings + shopping production skills (hard approve; dry-run default).
+    # Fail-closed must not stomp happy-path prod-08 verification.
+    prod08_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).endswith(".prod08_production_config")
+    ]
+    book_invs_p08 = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-BOOK-")
+    ]
+    pay_invs_p08 = [
+        c
+        for L in layers
+        if L["layer"] == "contract"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("INV-PAY-")
+    ]
+    prod08_pass = (
+        bool(prod08_unit)
+        and all(c.get("result") == "PASS" for c in prod08_unit)
+        and bool(book_invs_p08)
+        and all(c.get("result") == "PASS" for c in book_invs_p08)
+        and bool(pay_invs_p08)
+        and all(c.get("result") == "PASS" for c in pay_invs_p08)
+    )
+    if not broken:
+        prod08 = ROOT / "artifacts" / "test" / "prod-08"
+        prod08.mkdir(parents=True, exist_ok=True)
+        try:
+            book_cfg = load_booking_production_config()
+            shop_cfg = load_shopping_production_config()
+            book_harness = load_booking_harness_config()
+            shop_harness = load_shopping_harness_config()
+            payload = {
+                "bookings": {
+                    "mode": book_cfg.mode,
+                    "resolve_default": book_cfg.resolve_execute_mode(env={}),
+                    "hard_approve": book_cfg.hard_approve_mandatory(),
+                    "live_env": book_cfg.live_flag.env,
+                    "skill": "src/skills/bookings/SKILL.md",
+                    "config": "config/production/bookings.json",
+                    "harness": "config/bookings.harness.json",
+                    "harness_live_forbidden": book_harness.get("live_forbidden"),
+                },
+                "shopping": {
+                    "mode": shop_cfg.mode,
+                    "resolve_default": shop_cfg.resolve_execute_mode(env={}),
+                    "hard_approve": shop_cfg.hard_approve_mandatory(),
+                    "freeze_spending": shop_cfg.freeze_spending_honored(),
+                    "spend_caps": shop_cfg.spend_caps.to_dict(),
+                    "live_env": shop_cfg.live_flag.env,
+                    "skill": "src/skills/shopping/SKILL.md",
+                    "config": "config/production/shopping.json",
+                    "harness": "config/shopping.harness.json",
+                    "harness_live_forbidden": shop_harness.get("live_forbidden"),
+                },
+                "runbook": "docs/bookings-shopping-production.md",
+                "openclaw_snippet": "config/production/openclaw.skills.snippet.json",
+            }
+        except Exception as exc:  # noqa: BLE001
+            payload = {"error": str(exc)}
+            prod08_pass = False
+
+        (prod08 / "production-config.json").write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            prod08,
+            layer="prod-08",
+            result="PASS" if prod08_pass else "FAIL",
+            checks=prod08_unit + book_invs_p08 + pay_invs_p08,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "bookings_mode": (payload.get("bookings") or {}).get("mode"),
+                "shopping_mode": (payload.get("shopping") or {}).get("mode"),
+                "inv_book_green": all(c.get("result") == "PASS" for c in book_invs_p08),
+                "inv_pay_green": all(c.get("result") == "PASS" for c in pay_invs_p08),
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/prod-08/",
+                },
+            },
+        )
+        (prod08 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "PROD-08 production bookings + shopping: Booksy-class browser "
+                        "skill + merchant adapter configs behind hard approve; spend "
+                        "caps + freeze spending; dry-run default with BOOKINGS_LIVE / "
+                        "SHOPPING_LIVE documented; stub portal + dry-run merchant remain "
+                        "CI-only; INV-BOOK-001/002 and INV-PAY-001/002 still gate CI"
+                    ),
+                    "result": "PASS" if prod08_pass else "FAIL",
+                    "ci_overall": overall,
+                    "unit_checks": [c.get("id") for c in prod08_unit],
+                    "invariants": [
+                        "INV-BOOK-001",
+                        "INV-BOOK-002",
+                        "INV-PAY-001",
+                        "INV-PAY-002",
+                    ],
+                    "bookings_config": "config/production/bookings.json",
+                    "shopping_config": "config/production/shopping.json",
+                    "skills": [
+                        "src/skills/bookings/SKILL.md",
+                        "src/skills/shopping/SKILL.md",
+                    ],
+                    "runbook": "docs/bookings-shopping-production.md",
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-06",
+                        "make e2e-07",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/prod-08/report.json",
+                        "artifacts/test/prod-08/verification.json",
+                        "artifacts/test/prod-08/production-config.json",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
 
     # TASK-24 E2E-08 Self-mod patch accept + deny — T7 exit.
     # Fail-closed must not stomp happy-path task-24 / e2e-08 verification.

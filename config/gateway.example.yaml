@@ -85,6 +85,15 @@ skills:
         productionConfig: ./config/production/shopping.json
         harnessConfig: ./config/shopping.harness.json
         mode: dry_run
+    calendar:
+      # Soft confirm writes. CI uses in-memory stub (config/calendar.harness.json).
+      # Live Google: secrets from calendar.env.example + CALENDAR_LIVE=1.
+      # Docs: docs/calendar-production.md
+      enabled: false
+      config:
+        productionConfig: ./config/production/calendar.json
+        harnessConfig: ./config/calendar.harness.json
+        mode: google
 
 memory:
   profile_path: ./data/memory/profile.json
