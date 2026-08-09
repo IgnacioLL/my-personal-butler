@@ -434,6 +434,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:15 | PROD-01 | Agent A | composer-2.5 | implement | Docker compose + deploy runbook + systemd + backup scripts; status → review |
 | 2026-08-09 00:30 | PROD-01 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; prod01 compose/runbook/scripts structurally valid (Oracle+Hetzner); INV-* intact; status → done |
 | 2026-08-09 00:04 | PROD-03 | Agent A | cursor-grok-4.5-high | implement | Production STT+TTS config + inbound TTS; fixture STT kept; status → review |
+| 2026-08-09 00:09 | PROD-03 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; OpenAI transcribe/Whisper/inbound TTS + fixture STT spot-checks; status → done |
 | 2026-08-09 00:20 | PROD-07 | Agent A | cursor-grok-4.5-high | implement | Twilio/Telnyx voice production + INV-APPR-005 policy; status → review |
 | 2026-08-09 00:10 | PROD-07 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; webhook/INV-APPR-005/after-call/mock spot-checks; status → done |
 | 2026-08-09 00:25 | PROD-06 | Agent A | cursor-grok-4.5-high | implement | Google Calendar OAuth adapter + soft confirm; status → review |
@@ -496,11 +497,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Production transcription + TTS provider config and skill/wiring for OpenClaw media path. Primary: OpenAI transcription (`gpt-4o-transcribe` / mini) with Whisper fallback notes; TTS for inbound-audio replies. Env templates for keys. Keep fixture STT in harness for CI.
 - **Acceptance:** Documented + config-wired production STT/TTS; CI fixtures unchanged.
-- **Result:** PASS (Agent A implement) — Production voice path additive: `config/production/openclaw.voice.json` (OpenAI `gpt-4o-transcribe` → mini + `messages.tts.auto: inbound` / `gpt-4o-mini-tts`), Whisper CLI fallback fragment + notes, `voice.env.example` for `OPENAI_API_KEY`. Loader `src/intelligence/transcription/production.py` (structural only, no live HTTP). Aligned `agent-plan/intelligence/transcription.md` + `docs/production-voice.md`; enriched `config/openclaw/openclaw.production.json5` TTS providers. Fixture `SttStub` remains CI default (`unit.prod03.*`). Ready for Agent B.
-- **Artifacts:** `config/production/openclaw.voice.json`, `config/production/openclaw.voice.whisper-fallback.json`, `config/production/voice.env.example`, `config/production/README.md`, `docs/production-voice.md`, `src/intelligence/transcription/production.py`, `agent-plan/intelligence/transcription.md`
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0 (INV-INGRESS-001/002 fail under `--break-invariant`). Spot-checks: primary STT `gpt-4o-transcribe` → mini chain; Whisper CLI fallback notes (`openclaw.voice.whisper-fallback.json` + `docs/production-voice.md`); `messages.tts.auto: inbound` / `gpt-4o-mini-tts`; CI fixture `SttStub` intact (`unit.prod03.fixture_stt_unchanged` + `fx-reminder` → `[Audio] …`). `unit.prod03.*` PASS. No PROD-03 code gaps; INV-* not weakened.
+- **Artifacts:** `config/production/openclaw.voice.json`, `config/production/openclaw.voice.whisper-fallback.json`, `config/production/voice.env.example`, `config/production/README.md`, `docs/production-voice.md`, `src/intelligence/transcription/production.py`, `agent-plan/intelligence/transcription.md`, `artifacts/test/ci/` (`unit.prod03.*`)
 
 
 ### PROD-04 — OpenClaw skills pack: memory, reminders, todos, heartbeat
