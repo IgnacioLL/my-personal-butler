@@ -435,6 +435,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:30 | PROD-01 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; prod01 compose/runbook/scripts structurally valid (Oracle+Hetzner); INV-* intact; status → done |
 | 2026-08-09 00:04 | PROD-03 | Agent A | cursor-grok-4.5-high | implement | Production STT+TTS config + inbound TTS; fixture STT kept; status → review |
 | 2026-08-09 00:20 | PROD-07 | Agent A | cursor-grok-4.5-high | implement | Twilio/Telnyx voice production + INV-APPR-005 policy; status → review |
+| 2026-08-09 00:10 | PROD-07 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; webhook/INV-APPR-005/after-call/mock spot-checks; status → done |
 | 2026-08-09 00:25 | PROD-06 | Agent A | cursor-grok-4.5-high | implement | Google Calendar OAuth adapter + soft confirm; status → review |
 | 2026-08-09 00:06 | PROD-02 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; Luna/allowFrom/groups/Codex spot-checks; status → done |
 | 2026-08-09 00:08 | PROD-09 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; real-repo allowlist/hard-approve/freeze/INV-SELF spot-checks; status → done |
@@ -536,10 +537,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Full call path config: provider credentials template, webhook URL, outbound allowlist, INV-APPR-005 tool allowlist in production skill policy, after-call WhatsApp summary. Mock provider stays for CI.
 - **Acceptance:** Production voice plugin/config + runbook; CI mock path green.
-- **Result:** PASS (Agent A implement) — Production Twilio/Telnyx path: `config/production/openclaw.voice-call.json` + `voice-call.env.example` (webhook URL notes), outbound operator allowlist, `src/skills/voice-calls` + `call-mode.policy.json` (`INV-APPR-005` — no buy/book/self_mod_apply mid-call), after-call WhatsApp summary via `ProductionVoiceProvider`/`MockVoiceProvider`. Runbook `docs/voice-calls.md`; plan leaf aligned. CI stays on mock (`unit.voice.prod07_*` + existing mock/INV-APPR-005).
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: webhook notes (`publicUrl` `/voice/webhook`, env + runbook + gateway.example); INV-APPR-005 policy synced (skill/`call-mode.policy.json`/`allowlist.py`) blocks buy/book/self_mod_apply; after-call WhatsApp `kind=after_call_summary` queued; CI mock intact (`MockVoiceProvider` + `unit.voice.prod07_*` + contract `INV-APPR-005`). No code gaps. INV-* intact (no weaken).
 - **Artifacts:** `config/production/{openclaw.voice-call.json,voice-call.env.example,call-mode.policy.json}`, `src/skills/voice-calls/`, `src/channels/voice/{config,production}.py`, `src/policy/call_mode.py`, `docs/voice-calls.md`, `agent-plan/channels/voice-calls.md`, `config/gateway.example.yaml`, `scripts/prod07_voice_checks.py`, `scripts/run_test_ci.py`
 
 ### PROD-08 — Bookings + shopping production skills (hard approve)
