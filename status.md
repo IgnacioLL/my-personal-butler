@@ -424,6 +424,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 02:40 | TASK-26 | subagent-A | composer-2.5 | implement | CI gates audit + component-matrix mapping docs |
 | 2026-08-09 02:55 | TASK-26 | Agent A | composer-2.5 | implement | GATE_MAP docs + verification stamp; status → review |
 | 2026-08-09 03:00 | TASK-26 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; ci-gates audit + E2E-07/08 deny paths; status → done |
+| 2026-08-09 00:05 | PROD-wave | planner | — | dispatch | Parallel PROD-01..09 in_progress; cheapest cloud = Oracle Free / Hetzner; full always-on (not stub) |
 
 ---
 
@@ -433,7 +434,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 1. Read the relevant `agent-plan/**` leaf docs before coding.
 2. Follow autonomous verification loop in `testing/autonomous-agent-process.md`.
-3. Prefer mocks; fake the clock; assert state not prose.
+3. Prefer mocks in **CI/harness**; for PROD-* tasks ship **production OpenClaw config/skills/deploy** as first-class (no new stub-only production paths). Fake the clock in tests; assert state not prose.
 4. Write artifacts under `artifacts/test/<task-or-flow>/`.
 5. Update **this file**: set Status, Result (PASS/FAIL/BLOCKED + 3–8 lines), Artifacts paths, and append Dispatch log if needed.
 6. Commit on the working branch with a clear message; push when instructed by planner workflow.
@@ -446,4 +447,114 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 
 ## Current focus
 
-**Board complete** — TASK-00..26 all `done`. CI merge gate documented in `docs/ci-gates.md`; `make test-ci` + `make test-ci-fail-closed` green.
+**Wave PROD (full always-on app — not stubs):** parallel finish for real OpenClaw Gateway deploy + production channel/skill wiring. Harness CI stays green; production path is first-class.
+
+**Cheapest cloud deploy (answered):** Oracle Cloud Always Free ARM VM if available, else Hetzner CX22-class VPS (~€4–5/mo). Always-on Docker/systemd OpenClaw Gateway; persist `~/.openclaw`; Luna via Codex subscription. Not serverless.
+
+---
+
+## Production wave — full application (parallel)
+
+> Goal: ship a deployable always-on personal agent (OpenClaw + Luna + WhatsApp + Android + STT/TTS + calendar + calls + bookings + shopping + self-mod), not harness-only stubs. Keep `make test-ci` green. **No package installs** in agents — write Docker/install scripts the operator runs.
+
+### PROD-01 — Cloud deploy: Docker Compose + cheap VPS runbook
+- **Depends on:** —
+- **Model:** composer-2.5
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Full always-on deploy (not minimal). `deploy/docker-compose.yml` (or equivalent) for OpenClaw Gateway + volumes for credentials/memory/approvals; `docs/deploy.md` covering Oracle Always Free ARM **and** Hetzner CX22; systemd alternative; backup/restore of `~/.openclaw`; reboot survival; HTTPS/tunnel notes for later Twilio webhooks. Operator checklist from zero → Gateway up.
+- **Acceptance:** Operator can follow docs to bring Gateway up on a small VPS; compose validated structurally (agents cannot install OpenClaw if blocked — document exact commands).
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-02 — OpenClaw production config: Codex/Luna + WhatsApp allowlist
+- **Depends on:** —
+- **Model:** cursor-grok-4.5-high
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Production `config/openclaw/` (or `config/production/`) — Codex auth profile intent, **Luna default**, Terra/Sol escalation hooks, WhatsApp channel (Baileys) `allowFrom` your number, groups disabled, DM policy, media/STT pipeline hooks. No stub transport as the production path. Align with OpenClaw docs (WhatsApp Web QR login).
+- **Acceptance:** Copy-ready production config templates + README; harness still uses mocks for CI.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-03 — STT + TTS production providers (full voice path)
+- **Depends on:** —
+- **Model:** cursor-grok-4.5-high
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Production transcription + TTS provider config and skill/wiring for OpenClaw media path. Primary: OpenAI transcription (`gpt-4o-transcribe` / mini) with Whisper fallback notes; TTS for inbound-audio replies. Env templates for keys. Keep fixture STT in harness for CI.
+- **Acceptance:** Documented + config-wired production STT/TTS; CI fixtures unchanged.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-04 — OpenClaw skills pack: memory, reminders, todos, heartbeat
+- **Depends on:** —
+- **Model:** composer-2.5
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Package production OpenClaw skills under `src/skills/` (or OpenClaw skills dir convention) for memory R/W, reminders/habits, todos, morning brief/weekly review — real skill manifests that Gateway can load, not only Python harness services. Map harness logic → skill interfaces.
+- **Acceptance:** Skills loadable by OpenClaw layout; unit/contract still pass via harness adapters.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-05 — Android companion + approvals production wiring
+- **Depends on:** —
+- **Model:** cursor-grok-4.5-high
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Production pairing docs + config for OpenClaw Android node: todos sync, approval inbox (Accept/Deny/Edit), kill switches on Status screen, self-mod approval cards. Full always-on control plane — not API doubles alone.
+- **Acceptance:** Operator checklist to pair phone; config templates; CI doubles remain for gate tests.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-06 — Google Calendar production adapter (soft confirm)
+- **Depends on:** —
+- **Model:** cursor-grok-4.5-high
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Real Google Calendar OAuth/config + soft-confirm write path for production; in-memory calendar remains harness default. Conflict-aware suggestions preserved.
+- **Acceptance:** Production adapter + secrets template; harness calendar tests green.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-07 — Twilio (or Telnyx) voice calls production
+- **Depends on:** —
+- **Model:** cursor-grok-4.5-high
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Full call path config: provider credentials template, webhook URL, outbound allowlist, INV-APPR-005 tool allowlist in production skill policy, after-call WhatsApp summary. Mock provider stays for CI.
+- **Acceptance:** Production voice plugin/config + runbook; CI mock path green.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-08 — Bookings + shopping production skills (hard approve)
+- **Depends on:** —
+- **Model:** cursor-grok-4.5-high
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Production Booksy-class browser skill config + shopping merchant adapters behind hard approve, caps, freeze; dry-run default with live flag documented. Stub portal remains CI-only.
+- **Acceptance:** Production skill configs + safety flags; INV-BOOK/PAY still gate CI.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-09 — Self-mod production path + allowlist for this repo
+- **Depends on:** —
+- **Model:** cursor-grok-4.5-high
+- **Agents:** A implement · B review
+- **Status:** in_progress
+- **Scope:** Production self-mod skill targeting this repo’s allowlisted paths; hard approve; freeze self-mod; policy-change subtype; rollback refs. Fixture workspace stays for CI.
+- **Acceptance:** Allowlist for real repo paths + production skill; INV-SELF green in CI.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+### PROD-10 — Operator go-live checklist + secrets inventory
+- **Depends on:** PROD-01 (soft)
+- **Model:** composer-2.5
+- **Agents:** A implement · B review
+- **Status:** queued
+- **Scope:** Single `docs/go-live.md`: ordered enablement WhatsApp→STT→Android→Calendar→Calls→Book/Buy→Self-mod; secrets inventory (Codex, STT, Twilio, Google, etc.); cost expectations; what must be purchased vs subscription.
+- **Acceptance:** One doc an operator can follow end-to-end on phone.
+- **Result:** _(agent)_
+- **Artifacts:** _(agent)_
+
+---
