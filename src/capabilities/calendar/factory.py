@@ -22,7 +22,7 @@ from capabilities.calendar.store import CalendarStore
 CalendarAdapterImpl = Union[Any, GoogleCalendarAdapter]
 
 DEFAULT_HARNESS_PROFILE = "config/calendar.harness.json"
-DEFAULT_PRODUCTION_PROFILE = "config/calendar.production.example.json"
+DEFAULT_PRODUCTION_PROFILE = "config/production/calendar.json"
 
 
 @dataclass(frozen=True)
