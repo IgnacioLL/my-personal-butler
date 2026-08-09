@@ -438,9 +438,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:20 | PROD-07 | Agent A | cursor-grok-4.5-high | implement | Twilio/Telnyx voice production + INV-APPR-005 policy; status → review |
 | 2026-08-09 00:10 | PROD-07 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; webhook/INV-APPR-005/after-call/mock spot-checks; status → done |
 | 2026-08-09 00:25 | PROD-06 | Agent A | cursor-grok-4.5-high | implement | Google Calendar OAuth adapter + soft confirm; status → review |
+| 2026-08-09 00:14 | PROD-06 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; OAuth/soft-confirm/CI-memory spot-checks; top-level live fix; status → done |
 | 2026-08-09 00:06 | PROD-02 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; Luna/allowFrom/groups/Codex spot-checks; status → done |
 | 2026-08-09 00:08 | PROD-09 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; real-repo allowlist/hard-approve/freeze/INV-SELF spot-checks; status → done |
 | 2026-08-09 00:25 | PROD-05 | Agent A | cursor-grok-4.5-high | implement | Android pairing + control plane config; status → review |
+| 2026-08-09 00:12 | PROD-10 | Agent A | composer-2.5 | implement | Operator go-live checklist + secrets inventory; status → review |
 
 ---
 
@@ -528,11 +530,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Real Google Calendar OAuth/config + soft-confirm write path for production; in-memory calendar remains harness default. Conflict-aware suggestions preserved.
 - **Acceptance:** Production adapter + secrets template; harness calendar tests green.
-- **Result:** PASS (Agent A implement) — Production Google Calendar adapter (`GoogleCalendarAdapter`, stdlib OAuth/API v3) with soft-confirm write path via ActionGateway; dry-run default (`CALENDAR_LIVE`); secrets template `calendar.env.example`; factory keeps harness in-memory default. Conflict-aware propose preserved (`integration.calendar.prod06_google_soft_confirm`). Plan leaf + skill aligned. Ready for Agent B.
-- **Artifacts:** `src/capabilities/calendar/{google,factory,protocol}.py`, `config/production/calendar.json`, `config/production/calendar.env.example`, `config/calendar.harness.json`, `src/skills/calendar/`, `docs/calendar-production.md`, `agent-plan/capabilities/calendar.md`, `scripts/run_test_ci.py` (`unit.calendar.prod06_*`)
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: OAuth secrets template (`calendar.env.example`); soft-confirm Google dry-run (`integration.calendar.prod06_google_soft_confirm` create=0 until Accept); CI factory default remains in-memory stub. Review fix: honor top-level production JSON `"live"` when nested `google` omits it (`unit.calendar.prod06_toplevel_live_flag`). INV-* intact (no weaken).
+- **Artifacts:** `src/capabilities/calendar/{google,factory,protocol}.py`, `config/production/calendar.json`, `config/production/calendar.env.example`, `config/calendar.harness.json`, `src/skills/calendar/`, `docs/calendar-production.md`, `agent-plan/capabilities/calendar.md`, `scripts/run_test_ci.py` (`unit.calendar.prod06_*`, `integration.calendar.prod06_google_soft_confirm`)
 
 ### PROD-07 — Twilio (or Telnyx) voice calls production
 - **Depends on:** —
