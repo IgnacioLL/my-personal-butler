@@ -151,12 +151,7 @@ from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normaliz
 from channels.android.approvals import AndroidApprovalInboxApi  # noqa: E402
 from channels.android.notifications import AndroidNotificationCatcher  # noqa: E402
 from channels.android.projection import AndroidProjectionApi  # noqa: E402
-from channels.android.status import AndroidStatusApi  # noqa: E402
-from prod05_android_checks import (  # noqa: E402
-    run_android_approval_unit_checks as _run_android_approval_unit_checks,
-    run_android_status_unit_checks as _run_android_status_unit_checks,
-    run_prod05_android_config_checks as _run_prod05_android_config_checks,
-)
+import prod05_android_checks as _prod05_android_checks  # noqa: E402
 from channels.voice.allowlist import (  # noqa: E402
     CALL_MODE_ALLOWED_TOOLS,
     CALL_MODE_FORBIDDEN_TOOLS,
@@ -365,9 +360,9 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_reminder_unit_checks())
     checks.extend(_run_voice_unit_checks())
     checks.extend(_run_todo_unit_checks())
-    checks.extend(_run_android_approval_unit_checks())
-    checks.extend(_run_android_status_unit_checks())
-    checks.extend(_run_prod05_android_config_checks(ROOT))
+    checks.extend(_prod05_android_checks.run_android_approval_unit_checks())
+    checks.extend(_prod05_android_checks.run_android_status_unit_checks())
+    checks.extend(_prod05_android_checks.run_prod05_android_config_checks(ROOT))
     checks.extend(_run_calendar_unit_checks(ROOT))
     checks.extend(_run_diet_unit_checks(ROOT))
     checks.extend(_run_booking_unit_checks(ROOT))
@@ -3774,131 +3769,13 @@ def _run_selfmod_integration_checks(root: Path) -> list[dict[str, Any]]:
 
 
 def _run_android_status_unit_checks() -> list[dict[str, Any]]:
-    """Android Status screen: kill switches + pending/open counts (PROD-05 surface)."""
-    checks: list[dict[str, Any]] = []
-    clock = FakeClock()
-    gw = ActionGateway(clock=clock)
-    status = AndroidStatusApi(gw)
-
-    baseline = status.get()
-    base_ok = (
-        baseline.gateway_online
-        and baseline.paired
-        and not baseline.agent_paused
-        and not baseline.spend_frozen
-        and not baseline.self_mod_frozen
-        and baseline.pending_approvals == 0
-    )
-    checks.append(
-        {
-            "id": "unit.android_status.baseline",
-            "result": "PASS" if base_ok else "FAIL",
-            "detail": f"snap={baseline.to_dict()}",
-        }
-    )
-
-    paused = status.pause_agent()
-    resumed = status.resume_agent()
-    pause_ok = paused.agent_paused and not resumed.agent_paused
-    checks.append(
-        {
-            "id": "unit.android_status.pause_resume",
-            "result": "PASS" if pause_ok else "FAIL",
-            "detail": f"paused={paused.agent_paused} resumed={resumed.agent_paused}",
-        }
-    )
-
-    spend = status.freeze_spending()
-    unspend = status.unfreeze_spending()
-    spend_ok = spend.spend_frozen and not unspend.spend_frozen
-    checks.append(
-        {
-            "id": "unit.android_status.freeze_spending",
-            "result": "PASS" if spend_ok else "FAIL",
-            "detail": f"frozen={spend.spend_frozen} unfrozen={unspend.spend_frozen}",
-        }
-    )
-
-    sm = status.freeze_self_mod()
-    unsm = status.unfreeze_self_mod()
-    sm_ok = sm.self_mod_frozen and not unsm.self_mod_frozen
-    checks.append(
-        {
-            "id": "unit.android_status.freeze_self_mod",
-            "result": "PASS" if sm_ok else "FAIL",
-            "detail": f"frozen={sm.self_mod_frozen} unfrozen={unsm.self_mod_frozen}",
-        }
-    )
-
-    prop = gw.propose(
-        "calendar_create",
-        "Status pending probe",
-        {
-            "title": "Status pending probe",
-            "start": "2026-01-09T09:00:00+01:00",
-            "end": "2026-01-09T10:00:00+01:00",
-        },
-    )
-    after_prop = status.get()
-    cancelled_status, cancelled_ids = status.cancel_pending()
-    cancel_ok = (
-        prop.ok
-        and after_prop.pending_approvals >= 1
-        and cancelled_status.pending_approvals == 0
-        and prop.approval_id in cancelled_ids
-    )
-    checks.append(
-        {
-            "id": "unit.android_status.cancel_pending",
-            "result": "PASS" if cancel_ok else "FAIL",
-            "detail": (
-                f"pending_before={after_prop.pending_approvals} "
-                f"pending_after={cancelled_status.pending_approvals} "
-                f"cancelled={len(cancelled_ids)}"
-            ),
-        }
-    )
-
-    return checks
+    """Delegate to prod05 module — avoid weak local copies shadowing CI gates."""
+    return _prod05_android_checks.run_android_status_unit_checks()
 
 
 def _run_prod05_android_config_checks(root: Path) -> list[dict[str, Any]]:
-    """PROD-05: production Android config templates + harness doubles map."""
-    checks: list[dict[str, Any]] = []
-    example = root / "config" / "android.example.yaml"
-    harness = root / "config" / "android.harness.json"
-    runbook = root / "docs" / "android-pairing.md"
-
-    files_ok = example.is_file() and harness.is_file() and runbook.is_file()
-    checks.append(
-        {
-            "id": "unit.prod05.android_config_files",
-            "result": "PASS" if files_ok else "FAIL",
-            "detail": (
-                f"example={example.exists()} harness={harness.exists()} "
-                f"runbook={runbook.exists()}"
-            ),
-        }
-    )
-
-    doubles_ok = False
-    if harness.is_file():
-        raw = json.loads(harness.read_text(encoding="utf-8"))
-        doubles = raw.get("doubles") or {}
-        doubles_ok = (
-            doubles.get("status") == "channels.android.status.AndroidStatusApi"
-            and doubles.get("approvals") == "channels.android.approvals.AndroidApprovalInboxApi"
-            and doubles.get("todos") == "channels.android.projection.AndroidProjectionApi"
-            and raw.get("production_config") == "config/android.example.yaml"
-        )
-    checks.append(
-        {
-            "id": "unit.prod05.android_harness_doubles",
-            "result": "PASS" if doubles_ok else "FAIL",
-            "detail": f"doubles_ok={doubles_ok}",
-        }
-    )
-    return checks
+    """Delegate to prod05 module — pairing/config shape gates stay fail-closed."""
+    return _prod05_android_checks.run_prod05_android_config_checks(root)
 
 
 def _run_android_approval_integration_checks(root: Path) -> list[dict[str, Any]]:
