@@ -93,9 +93,9 @@ Production config enables `tools.media.audio` with OpenAI `gpt-4o-transcribe` (m
 
 - Empty / garbage transcript → ask to re-speak or send text (do not invent hard-action intent).
 - `echoTranscript: true` echoes the transcript for high-stakes clarity.
-- TTS reply mode is `messages.tts.auto: "inbound"` (speak back only if you spoke).
+- TTS reply mode is `messages.tts.auto: "inbound"` with OpenAI `gpt-4o-mini-tts` (speak back only if you spoke).
 
-Full STT/TTS provider wiring continues in PROD-03; this template already hooks the media path so WhatsApp audio is not a stub.
+**PROD-03 full voice path:** merge fragment + env template under [`../production/`](../production/) (`openclaw.voice.json`, `voice.env.example`, optional Whisper CLI fallback). Operator runbook: [`../../docs/production-voice.md`](../../docs/production-voice.md). Set `OPENAI_API_KEY` for STT/TTS API calls (Codex subscription covers Luna chat; STT/TTS still need the API key).
 
 ### 6. Smoke (production only — never in CI)
 
@@ -122,5 +122,6 @@ Full STT/TTS provider wiring continues in PROD-03; this template already hooks t
 | Transport | WhatsApp Web (Baileys) | `whatsapp_transport.py` mock |
 | Auth | Codex OAuth profile | stubs / no live Luna |
 | Models | `openai/gpt-5.6-luna` (+ Terra/Sol) | `src/intelligence/models/router.py` |
-| STT | `tools.media.audio` providers | `SttStub` + audio fixtures |
+| STT | `tools.media.audio` + [`../production/openclaw.voice.json`](../production/openclaw.voice.json) | `SttStub` + audio fixtures |
+| TTS | `messages.tts.auto: inbound` + OpenAI `gpt-4o-mini-tts` | `TtsPolicySpy` mode rules |
 | Config entry | `~/.openclaw/openclaw.json` | `config/gateway.harness.json` |

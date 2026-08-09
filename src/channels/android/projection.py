@@ -1,7 +1,8 @@
-"""Android projection API double — list/get/complete todos for paired node.
+"""Android projection API double — todos + approvals + Status for paired node.
 
 Gateway owns canonical state; this API reflects the same ids/titles/statuses
 that WhatsApp-created todos produce. Used by integration tests and E2E-03 prep.
+Production pairing: docs/android-pairing.md + config/android.example.yaml.
 """
 
 from __future__ import annotations
@@ -9,8 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from capabilities.todos.store import Todo, TodoSource, TodoStatus, TodoStore
+from capabilities.todos.store import Todo, TodoSource, TodoStore
 from channels.android.approvals import AndroidApprovalInboxApi
+from channels.android.status import AndroidStatusApi
 from harness.clock import FakeClock
 from policy.action_gateway import ActionGateway
 
@@ -32,7 +34,7 @@ def _project(todo: Todo) -> TodoProjection:
 
 
 class AndroidProjectionApi:
-    """API-level Android node simulation for todo sync + approval inbox."""
+    """API-level Android node simulation for todo sync + approval inbox + Status."""
 
     def __init__(
         self,
@@ -45,9 +47,11 @@ class AndroidProjectionApi:
         self.clock = clock
         self.gateway = gateway
         self.approvals: AndroidApprovalInboxApi | None = None
+        self.status: AndroidStatusApi | None = None
         if self.gateway is not None:
             self.gateway.todos = self.store
             self.approvals = AndroidApprovalInboxApi(self.gateway)
+            self.status = AndroidStatusApi(self.gateway)
 
     def list_todos(self, *, status: str | None = None) -> list[TodoProjection]:
         todos = self.store.list_all()
@@ -88,4 +92,6 @@ class AndroidProjectionApi:
         }
         if self.approvals is not None:
             data["approvals"] = self.approvals.snapshot()
+        if self.status is not None:
+            data["status"] = self.status.snapshot()
         return data

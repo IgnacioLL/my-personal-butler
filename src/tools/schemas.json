@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "description": "OpenClaw tool schemas for PROD-04 skills pack — maps to ActionGateway action types.",
+  "tools": [
+    {
+      "name": "memory_read",
+      "description": "Read hot profile, a profile section, or episodic memories.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["hot", "episodes", "section"] },
+          "section": { "type": "string" },
+          "key": { "type": "string" },
+          "limit": { "type": "integer" },
+          "tag": { "type": "string" }
+        }
+      },
+      "action_type": "memory_read",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "memory_update",
+      "description": "Propose a durable profile update (soft confirm before write).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "section": { "type": "string" },
+          "key": { "type": "string" },
+          "value": {},
+          "explicit": { "type": "boolean" }
+        },
+        "required": ["section", "key", "value"]
+      },
+      "action_type": "memory_update",
+      "approval_tier": "soft_confirm"
+    },
+    {
+      "name": "reminder_create",
+      "description": "Create a one-shot or recurring reminder.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "timezone": { "type": "string" },
+          "kind": { "type": "string", "enum": ["one_shot", "recurring"] },
+          "due_at": { "type": "string" },
+          "weekday": { "type": "integer" },
+          "hour": { "type": "integer" },
+          "minute": { "type": "integer" },
+          "recipient": { "type": "string" }
+        },
+        "required": ["text", "due_at"]
+      },
+      "action_type": "reminder_create",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "habit_create",
+      "description": "Create a recurring habit with optional escalation ladder.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "timezone": { "type": "string" },
+          "due_at": { "type": "string" },
+          "weekday": { "type": "integer" },
+          "hour": { "type": "integer" },
+          "minute": { "type": "integer" },
+          "habit_priority": { "type": "string" },
+          "escalation_enabled": { "type": "boolean" },
+          "recipient": { "type": "string" }
+        },
+        "required": ["text", "due_at", "weekday"]
+      },
+      "action_type": "habit_create",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "reminder_list",
+      "description": "List active reminders and habits.",
+      "parameters": { "type": "object", "properties": {} },
+      "action_type": "reminder_list",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "reminder_snooze",
+      "description": "Snooze a reminder until a new due time.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reminder_id": { "type": "string" },
+          "until": { "type": "string" }
+        },
+        "required": ["reminder_id", "until"]
+      },
+      "action_type": "reminder_snooze",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "reminder_cancel",
+      "description": "Cancel an active reminder or habit.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reminder_id": { "type": "string" }
+        },
+        "required": ["reminder_id"]
+      },
+      "action_type": "reminder_cancel",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "todo_add",
+      "description": "Add a todo (deduplicates near-identical open titles).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "created_from": { "type": "string" },
+          "recipient": { "type": "string" }
+        },
+        "required": ["title"]
+      },
+      "action_type": "todo_add",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "todo_complete",
+      "description": "Mark a todo done.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "todo_id": { "type": "string" }
+        },
+        "required": ["todo_id"]
+      },
+      "action_type": "todo_complete",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "todo_read",
+      "description": "List todos filtered by status or tag.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["open", "done", "all"] },
+          "tag": { "type": "string" }
+        }
+      },
+      "action_type": "todo_read",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "todo_cancel",
+      "description": "Cancel an open todo.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "todo_id": { "type": "string" }
+        },
+        "required": ["todo_id"]
+      },
+      "action_type": "todo_cancel",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "heartbeat_morning_brief",
+      "description": "Emit morning brief when pause/quiet policy allows.",
+      "parameters": { "type": "object", "properties": {} },
+      "action_type": "heartbeat_morning_brief",
+      "approval_tier": "auto"
+    },
+    {
+      "name": "heartbeat_weekly_review",
+      "description": "Emit weekly memory hygiene nudge when policy allows.",
+      "parameters": { "type": "object", "properties": {} },
+      "action_type": "heartbeat_weekly_review",
+      "approval_tier": "auto"
+    }
+  ]
+}

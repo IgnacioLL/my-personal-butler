@@ -19,7 +19,17 @@
     {
       "id": "approvals_db",
       "path": "data/approvals/items.json",
-      "notes": "Pending + decided approval items (restart durability)"
+      "notes": "Pending + decided approval items (restart durability; Android inbox)"
+    },
+    {
+      "id": "todos_db",
+      "path": "data/todos/items.json",
+      "notes": "Canonical todos projected to Android companion"
+    },
+    {
+      "id": "android_config",
+      "path": "config/android.example.yaml",
+      "notes": "Template only — merge into gateway.local.yaml for live pairing"
     },
     {
       "id": "skill_configs",

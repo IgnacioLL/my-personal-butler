@@ -1,0 +1,12 @@
+{
+  "skill": "bookings",
+  "mode": "stub_portal",
+  "approval": {
+    "tier": "hard_approve",
+    "mandatory": true,
+    "action_type": "book"
+  },
+  "portal_fixture": "fixtures/browser/booksy-stub-slots.json",
+  "live_forbidden": true,
+  "notes": "Harness/CI Booksy stub only. No live Booksy mutations (INV-BOOK-001/002). Production: config/production/bookings.json."
+}

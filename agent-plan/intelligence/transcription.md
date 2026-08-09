@@ -25,15 +25,29 @@ WhatsApp OGG voice note
   → optional TTS reply if inbound was audio
 ```
 
-## Model guidance
+## Model guidance (production)
 
-Use a dedicated transcription-capable model/provider (examples to evaluate at implementation time):
+Use a **dedicated** transcription provider — independent from Luna / Codex chat:
 
-- OpenAI transcription models (`gpt-4o-transcribe` / mini variant)
-- Whisper API or local Whisper fallback
-- Alternatives (Deepgram, etc.) if latency/cost wins
+| Priority | Provider | Model | Notes |
+| --- | --- | --- | --- |
+| 1 (primary) | OpenAI | `gpt-4o-transcribe` | Best accuracy for short WhatsApp notes |
+| 2 (fallback) | OpenAI | `gpt-4o-mini-transcribe` | Next in OpenClaw `tools.media.audio.models` chain |
+| 3 (optional) | Whisper CLI | local `whisper` binary | Offline / API-outage resilience |
+
+**TTS (WhatsApp replies):** OpenAI `gpt-4o-mini-tts` with `messages.tts.auto: inbound` — speak back only when the user sent audio.
+
+Copy-ready OpenClaw fragments + env template:
+
+- [`config/production/openclaw.voice.json`](../../config/production/openclaw.voice.json)
+- [`config/production/voice.env.example`](../../config/production/voice.env.example)
+- Operator runbook: [`docs/production-voice.md`](../../docs/production-voice.md)
 
 Do **not** rely on Luna alone as the STT system unless OpenClaw’s media path proves it is first-class and reliable for your language.
+
+### Harness / CI
+
+CI keeps the fixture STT path (`SttStub` + `fixtures/audio/`). Production providers are additive — never required for `make test-ci`. Default `STT_PROVIDER` resolves to `fixture`.
 
 ## UX around errors
 
@@ -49,7 +63,8 @@ Call audio may use realtime transcription from the voice-call provider path. Sti
 
 ## Acceptance criteria
 
-- [ ] 100% of WhatsApp voice notes pass through STT
-- [ ] Transcript available to the agent turn
-- [ ] Failure path asks for clarification instead of hallucinating intent
-- [ ] Optional transcript echo for high-stakes commands
+- [x] 100% of WhatsApp voice notes pass through STT (harness: INV-INGRESS-003; production: `tools.media.audio.enabled`)
+- [x] Transcript available to the agent turn (`[Audio] <transcript>`)
+- [x] Failure path asks for clarification instead of hallucinating intent
+- [x] Optional transcript echo for high-stakes commands
+- [x] Production STT/TTS config wired (`config/production/`) with inbound TTS

@@ -128,10 +128,22 @@
   },
 
   // Speak back only when the operator sent a voice note (inbound TTS mode).
+  // Full provider block also shipped as merge fragment:
+  //   config/production/openclaw.voice.json (PROD-03)
   messages: {
     tts: {
       auto: "inbound",
+      mode: "final",
       provider: "openai",
+      maxTextLength: 4000,
+      timeoutMs: 30000,
+      providers: {
+        openai: {
+          // API key from OPENAI_API_KEY / config/production/voice.env.example
+          model: "gpt-4o-mini-tts",
+          voice: "alloy",
+        },
+      },
     },
   },
 }

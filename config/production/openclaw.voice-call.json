@@ -1,0 +1,67 @@
+{
+  "_meta": {
+    "task": "PROD-07",
+    "purpose": "OpenClaw merge fragment: @openclaw/voice-call production plugin (Twilio/Telnyx)",
+    "merge_into": "~/.openclaw/openclaw.json under plugins.entries.voice-call",
+    "docs": [
+      "docs/voice-calls.md",
+      "agent-plan/channels/voice-calls.md",
+      "https://docs.openclaw.ai/plugins/voice-call"
+    ],
+    "ci_note": "Harness CI uses MockVoiceProvider (provider=mock). Never point test:ci at live Twilio/Telnyx."
+  },
+  "plugins": {
+    "entries": {
+      "voice-call": {
+        "enabled": true,
+        "config": {
+          "provider": "twilio",
+          "fromNumber": "+15550001234",
+          "toNumber": "+15550005678",
+          "sessionScope": "per-call",
+          "inboundPolicy": "disabled",
+          "allowFrom": [],
+          "maxDurationSeconds": 300,
+          "maxConcurrentCalls": 1,
+          "skipSignatureVerification": false,
+          "twilio": {
+            "accountSid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "authToken": "REPLACE_VIA_ENV_OR_SECRETREF"
+          },
+          "telnyx": {
+            "apiKey": "REPLACE_VIA_ENV_OR_SECRETREF",
+            "connectionId": "REPLACE_ME",
+            "publicKey": "REPLACE_VIA_ENV_OR_SECRETREF"
+          },
+          "serve": {
+            "port": 3334,
+            "path": "/voice/webhook"
+          },
+          "webhookSecurity": {
+            "allowedHosts": ["gateway.example.com"]
+          },
+          "publicUrl": "https://gateway.example.com/voice/webhook",
+          "outbound": {
+            "defaultMode": "notify"
+          },
+          "realtime": {
+            "enabled": false,
+            "toolPolicy": "safe-read-only"
+          },
+          "streaming": {
+            "enabled": false
+          }
+        }
+      }
+    }
+  },
+  "personalButler": {
+    "voiceCalls": {
+      "outboundAllowlist": ["+15550005678"],
+      "callModePolicy": "src/skills/voice-calls/policy.json",
+      "afterCallWhatsAppSummary": true,
+      "quietHoursRespected": true,
+      "maxCallsPerHour": 3
+    }
+  }
+}

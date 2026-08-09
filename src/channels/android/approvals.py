@@ -13,6 +13,15 @@ from policy.action_gateway import ActionGateway, ExecuteResult
 from policy.approvals import ApprovalItem, ApprovalStatus, ApprovalTier
 
 
+def _card_badge(action_type: str, subtype: Optional[str]) -> Optional[str]:
+    """Visual badge for Android inbox — self-mod cards stay distinct."""
+    if subtype == "policy-change" or action_type == "policy_change":
+        return "policy-change"
+    if action_type in {"self_mod_apply", "self_mod_propose"}:
+        return "Code change"
+    return None
+
+
 @dataclass(frozen=True)
 class ApprovalProjection:
     """Android-facing approval card shape (v1 inbox)."""
@@ -31,6 +40,7 @@ class ApprovalProjection:
     diff_summary: Optional[str] = None
     files_touched: Optional[list[str]] = None
     rollback_ref: Optional[str] = None
+    badge: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,10 +58,12 @@ class ApprovalProjection:
             "diff_summary": self.diff_summary,
             "files_touched": list(self.files_touched) if self.files_touched else None,
             "rollback_ref": self.rollback_ref,
+            "badge": self.badge,
         }
 
 
 def _project(item: ApprovalItem) -> ApprovalProjection:
+    subtype = item.subtype
     return ApprovalProjection(
         id=item.id,
         action_type=item.action_type,
@@ -63,10 +75,11 @@ def _project(item: ApprovalItem) -> ApprovalProjection:
         expires_at=item.expires_at.isoformat() if item.expires_at else None,
         source_channel=item.source_channel,
         source_utterance=item.source_utterance,
-        subtype=item.subtype,
+        subtype=subtype,
         diff_summary=item.diff_summary,
         files_touched=list(item.files_touched) if item.files_touched else None,
         rollback_ref=item.rollback_ref,
+        badge=_card_badge(item.action_type, subtype),
     )
 
 
@@ -112,6 +125,7 @@ class AndroidApprovalInboxApi:
                     tier="",
                     status="missing",
                     payload={},
+                    badge=None,
                 ),
                 execute=executed,
                 reason="not_found_after_accept",

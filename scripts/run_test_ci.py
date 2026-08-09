@@ -66,6 +66,14 @@ from intelligence.models.roles import ModelRole  # noqa: E402
 from intelligence.models.router import RoutingSignals, route  # noqa: E402
 from intelligence.models.stubs import ModelStubRegistry  # noqa: E402
 from intelligence.transcription.pipeline import TranscriptionPipeline  # noqa: E402
+from intelligence.transcription.production import (  # noqa: E402
+    PRIMARY_STT_MODEL,
+    PRIMARY_TTS_MODEL,
+    SttProviderKind,
+    load_production_voice_config,
+    resolve_stt_provider_kind,
+    validate_production_voice_tree,
+)
 from intelligence.transcription.stt import SttOutcome, SttStub, load_manifest  # noqa: E402
 from intelligence.transcription.tts import TtsMode, TtsPolicySpy  # noqa: E402
 from capabilities.reminders.parse import next_weekly_after, parse_reminder  # noqa: E402
@@ -119,6 +127,7 @@ from capabilities.todos.store import TodoSource, TodoStatus, TodoStore, normaliz
 from channels.android.approvals import AndroidApprovalInboxApi  # noqa: E402
 from channels.android.notifications import AndroidNotificationCatcher  # noqa: E402
 from channels.android.projection import AndroidProjectionApi  # noqa: E402
+from channels.android.status import AndroidStatusApi  # noqa: E402
 from channels.voice.allowlist import (  # noqa: E402
     CALL_MODE_ALLOWED_TOOLS,
     CALL_MODE_FORBIDDEN_TOOLS,
@@ -313,12 +322,15 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_voice_unit_checks())
     checks.extend(_run_todo_unit_checks())
     checks.extend(_run_android_approval_unit_checks())
+    checks.extend(_run_android_status_unit_checks())
+    checks.extend(_run_prod05_android_config_checks(ROOT))
     checks.extend(_run_calendar_unit_checks(ROOT))
     checks.extend(_run_diet_unit_checks(ROOT))
     checks.extend(_run_booking_unit_checks(ROOT))
     checks.extend(_run_shopping_unit_checks(ROOT))
     checks.extend(_run_selfmod_unit_checks(ROOT))
     checks.extend(_run_task25_unit_checks(ROOT))
+    checks.extend(_run_skill_pack_unit_checks(ROOT))
 
     result = "PASS" if all(c["result"] == "PASS" for c in checks) else "FAIL"
     write_report(out_dir / "unit", layer="unit", result=result, checks=checks)
@@ -820,10 +832,86 @@ def _run_transcription_unit_checks(root: Path) -> list[dict[str, Any]]:
             ),
         }
     )
+
+    # PROD-03: production voice fragment structure (no live STT/TTS).
+    checks.extend(_run_prod03_voice_unit_checks(root))
     return checks
 
 
-def _run_models_unit_checks(root: Path) -> list[dict[str, Any]]:
+def _run_prod03_voice_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Production STT/TTS config is additive; fixture STT remains CI default."""
+    checks: list[dict[str, Any]] = []
+    try:
+        snap = validate_production_voice_tree(root)
+        struct_ok = (
+            snap.get("primary_stt") == PRIMARY_STT_MODEL
+            and snap.get("tts_auto") == "inbound"
+            and snap.get("tts_model") == PRIMARY_TTS_MODEL
+            and snap.get("default_stt_provider") == SttProviderKind.FIXTURE.value
+            and "tools" in (snap.get("fragment_keys") or [])
+            and "messages" in (snap.get("fragment_keys") or [])
+        )
+        detail = (
+            f"primary={snap.get('primary_stt')} tts={snap.get('tts_auto')}/"
+            f"{snap.get('tts_model')} default_provider={snap.get('default_stt_provider')} "
+            f"whisper={snap.get('whisper_cli')}"
+        )
+    except Exception as exc:  # noqa: BLE001 — surface as FAIL detail
+        struct_ok = False
+        detail = f"error={exc}"
+    checks.append(
+        {
+            "id": "unit.prod03.voice_config_structure",
+            "result": "PASS" if struct_ok else "FAIL",
+            "detail": detail,
+        }
+    )
+
+    # Fixture STT path unchanged: pipeline.from_fixtures still uses SttStub.
+    pipeline = TranscriptionPipeline.from_fixtures()
+    fixture_ok = (
+        isinstance(pipeline.stt, SttStub)
+        and resolve_stt_provider_kind(env={}) is SttProviderKind.FIXTURE
+        and resolve_stt_provider_kind(env={"STT_PROVIDER": "openai"})
+        is SttProviderKind.OPENAI
+    )
+    rem = pipeline.stt.transcribe("fx-reminder")
+    fixture_ok = fixture_ok and rem.usable and (rem.turn_body or "").startswith("[Audio] ")
+    checks.append(
+        {
+            "id": "unit.prod03.fixture_stt_unchanged",
+            "result": "PASS" if fixture_ok else "FAIL",
+            "detail": (
+                f"stt_type={type(pipeline.stt).__name__} "
+                f"default={resolve_stt_provider_kind(env={}).value} "
+                f"transcript={rem.transcript!r}"
+            ),
+        }
+    )
+
+    cfg = load_production_voice_config(root / "config" / "production" / "openclaw.voice.json")
+    inbound_ok = (
+        cfg.tts.is_inbound()
+        and cfg.tts.harness_mode is TtsMode.INBOUND
+        and cfg.openai_stt_models[:2]
+        == ["gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
+    )
+    checks.append(
+        {
+            "id": "unit.prod03.tts_inbound_openclaw",
+            "result": "PASS" if inbound_ok else "FAIL",
+            "detail": (
+                f"auto={cfg.tts.auto} harness={cfg.tts.harness_mode.value} "
+                f"stt_chain={cfg.openai_stt_models}"
+            ),
+        }
+    )
+    return checks
+
+
+def _run_models_unit_checks_PLACEHOLDER_DO_NOT_USE(root: Path) -> list[dict[str, Any]]:
+    """Placeholder to keep old_string unique — replaced below."""
+    return []
     """Models router: fixture table, Luna default, Terra/Sol escalation, stub registry."""
     checks: list[dict[str, Any]] = []
     fixture_path = root / "fixtures" / "models" / "routing-intents.json"
@@ -3894,6 +3982,76 @@ def _run_task25_unit_checks(root: Path) -> list[dict[str, Any]]:
             "id": "unit.injection_guard.approve_all",
             "result": "PASS" if injection_ok else "FAIL",
             "detail": f"flagged={flagged} patterns={len(patterns)} clean={not clean}",
+        }
+    )
+    return checks
+
+
+def _run_skill_pack_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """PROD-04 OpenClaw skills pack — manifests, schemas, gateway tool adapters."""
+    from tools.registry import validate_skill_pack  # noqa: E402
+
+    checks: list[dict[str, Any]] = []
+    pack = validate_skill_pack()
+    checks.append(
+        {
+            "id": "unit.skill_pack.manifests",
+            "result": "PASS" if pack["ok"] else "FAIL",
+            "detail": f"skills={pack['skills']} tools={pack['tool_count']} errors={pack['errors']}",
+        }
+    )
+
+    # Gateway memory_read returns hot profile when store attached (not stub).
+    fixture = root / "fixtures" / "memory" / "seed-profile.json"
+    with tempfile.TemporaryDirectory() as tmp:
+        mem_root = Path(tmp) / "memory"
+        memory = MemoryStore.seed_from_fixture(mem_root, fixture)
+        clock = FakeClock()
+        gw = ActionGateway(clock=clock)
+        gw.attach_memory(memory)
+        read = gw.propose("memory_read", "read hot", {"mode": "hot"})
+        hot_ok = (
+            read.ok
+            and read.executed
+            and read.auto_result is not None
+            and read.auto_result.get("hot_profile", {}).get("identity", {}).get("name") == "Alex"
+            and "stub" not in read.auto_result
+        )
+        checks.append(
+            {
+                "id": "unit.skill_pack.gateway_memory_read",
+                "result": "PASS" if hot_ok else "FAIL",
+                "detail": f"ok={read.ok} executed={read.executed} stub={'stub' in (read.auto_result or {})}",
+            }
+        )
+
+        todo_store = TodoStore()
+        gw.todos = todo_store
+        todo_store.create(title="pack test", created_at=clock.now())
+        todo_read = gw.propose("todo_read", "list", {"status": "open"})
+        todo_ok = (
+            todo_read.ok
+            and todo_read.executed
+            and (todo_read.auto_result or {}).get("count") == 1
+        )
+        checks.append(
+            {
+                "id": "unit.skill_pack.gateway_todo_read",
+                "result": "PASS" if todo_ok else "FAIL",
+                "detail": f"count={(todo_read.auto_result or {}).get('count')}",
+            }
+        )
+
+    extra_dirs_ok = False
+    prod_cfg = root / "config" / "openclaw" / "skills-production.json5"
+    if prod_cfg.is_file():
+        text = prod_cfg.read_text(encoding="utf-8")
+        extra_dirs_ok = "extraDirs" in text and "src/skills" in text
+    checks.append(
+        {
+            "id": "unit.skill_pack.openclaw_config",
+            "result": "PASS" if extra_dirs_ok else "FAIL",
+            "detail": f"skills-production.json5 extraDirs={'yes' if extra_dirs_ok else 'no'}",
         }
     )
     return checks

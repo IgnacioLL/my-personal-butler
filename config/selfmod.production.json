@@ -1,0 +1,46 @@
+{
+  "skill": "self_modification",
+  "mode": "production_repo",
+  "workspace_root": ".",
+  "allowlist": "config/selfmod.allowlist.production.json",
+  "skill_path": "src/skills/self-modification/SKILL.md",
+  "branch_prefix": "cursor/agent-self-",
+  "diff_ceiling_lines": 400,
+  "approval": {
+    "tier": "hard_approve",
+    "apply_requires_accept": true,
+    "soft_confirm_forbidden": true,
+    "auto_forbidden": true
+  },
+  "kill_switches": {
+    "freeze_self_mod": "blocks apply/write; source_read + propose remain"
+  },
+  "subtypes": {
+    "policy-change": {
+      "when": "policy_path_globs match any file in the proposal",
+      "action_type": "policy_change",
+      "louder": true
+    }
+  },
+  "rollback": {
+    "record_rollback_ref": true,
+    "prefer_branch_first": true,
+    "protect_main": true
+  },
+  "openclaw": {
+    "load": "Copy or symlink src/skills/self-modification into the Gateway workspace skills/ (or set skills.load.extraDirs to this repo's src/skills).",
+    "tools_gated": [
+      "self_mod_propose",
+      "self_mod_apply",
+      "policy_change",
+      "source_read"
+    ]
+  },
+  "ci": {
+    "fixture_allowlist": "fixtures/selfmod/allowlist.json",
+    "fixture_workspace": "fixtures/selfmod/sample-workspace",
+    "harness_config": "config/selfmod.harness.json",
+    "notes": "CI/INV-SELF use fixtures only — never apply to the live checkout in test:ci."
+  },
+  "notes": "Production self-mod for this repo (PROD-09). Propose → hard Accept → apply on cursor/agent-self-* with rollback_ref. freeze_self_mod blocks apply. Secrets/local env paths forbidden."
+}

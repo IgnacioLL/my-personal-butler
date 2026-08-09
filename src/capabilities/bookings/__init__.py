@@ -2,6 +2,9 @@
 
 Import service from capabilities.bookings.service directly when needed alongside
 harness clocks to avoid circular package init.
+
+Production config loader: capabilities.bookings.production (dry-run default;
+BOOKINGS_LIVE gated). CI keeps StubBooksyPortal.
 """
 
 from capabilities.bookings.parse import (

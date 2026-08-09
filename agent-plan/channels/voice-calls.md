@@ -28,32 +28,54 @@ WhatsApp is great for async. Calls are for:
 
 ## Provider direction
 
-Use OpenClaw voice-call plugin with Twilio (or Telnyx/Plivo):
+Use OpenClaw `@openclaw/voice-call` with **Twilio** (or **Telnyx**):
 
-- dedicated number
-- public webhook to Gateway
-- caller-ID allowlist if inbound is enabled later
+- dedicated number (`fromNumber`)
+- public HTTPS webhook to Gateway (`publicUrl` → `/voice/webhook`)
+- outbound allowlist locked to the operator handset (`toNumber`)
+- inbound disabled in v1 (`inboundPolicy: disabled`); caller-ID allowlist only if inbound is enabled later
+
+Production templates + runbook:
+
+- [`config/production/openclaw.voice-call.json`](../../config/production/openclaw.voice-call.json)
+- [`config/production/voice-call.env.example`](../../config/production/voice-call.env.example)
+- [`config/production/call-mode.policy.json`](../../config/production/call-mode.policy.json)
+- [`src/skills/voice-calls/`](../../src/skills/voice-calls/)
+- [`docs/voice-calls.md`](../../docs/voice-calls.md)
+
+CI / harness keeps `MockVoiceProvider` (`provider: mock`) — no live carriers in `test:ci`.
 
 ## Safety rules
 
-1. Call mode tool allowlist is narrow
+1. Call mode tool allowlist is narrow (`INV-APPR-005`)
 2. Any mutating action becomes a post-call approval/task (including code-change proposals)
 3. Quiet hours respected unless marked emergency
 4. Cap call frequency (avoid spam loops)
+5. Outbound dial only numbers on the operator allowlist
+
+### Call-mode tool allowlist (`INV-APPR-005`)
+
+| Allowed mid-call | Forbidden mid-call |
+| --- | --- |
+| `calendar_read`, `memory_read`, `todo_read`, `source_read` | `buy`, `book`, `self_mod_apply` (and any non-allowlisted mutator) |
+
+Forbidden hard actions return `call_mode_forbidden_hard_action`. Policy files:
+`src/skills/voice-calls/policy.json`, `config/production/call-mode.policy.json`,
+`src/channels/voice/allowlist.py`.
 
 ## Flow
 
 ```text
 Reminder fires → policy says "call"
-  → place outbound call
-  → speak reminder / ask yes-no
+  → place outbound call (allowlisted operator number)
+  → speak reminder / ask yes-no (read-only tools only)
   → write outcome to todos/memory
-  → send WhatsApp summary
+  → send WhatsApp summary (kind=after_call_summary)
 ```
 
 ## Acceptance criteria
 
-- [ ] Agent can place an outbound call to your number
-- [ ] Call content is grounded in the triggering reminder
-- [ ] No purchase/booking/self-mod-apply tools available mid-call
-- [ ] Call creates an auditable after-call note
+- [x] Agent can place an outbound call to your number (production: OpenClaw plugin + allowlist; CI: mock provider)
+- [x] Call content is grounded in the triggering reminder
+- [x] No purchase/booking/self-mod-apply tools available mid-call (`INV-APPR-005`)
+- [x] Call creates an auditable after-call WhatsApp note

@@ -1,0 +1,52 @@
+// Production OpenClaw config — PROD-04 skills pack (memory, reminders, todos, heartbeat).
+// Merge into ~/.openclaw/openclaw.json or pass as Gateway config overlay on VPS deploy.
+{
+  skills: {
+    load: {
+      // Repo-relative when Gateway working directory is the project root.
+      extraDirs: ["./src/skills"],
+      watch: true,
+    },
+    entries: {
+      "personal-memory": { enabled: true },
+      "reminders-habits": { enabled: true },
+      "personal-todos": { enabled: true },
+      "heartbeat-ops": { enabled: true },
+    },
+  },
+  agents: {
+    defaults: {
+      skills: [
+        "personal-memory",
+        "reminders-habits",
+        "personal-todos",
+        "heartbeat-ops",
+      ],
+    },
+  },
+  cron: {
+    heartbeat_enabled: true,
+    jobs: [
+      {
+        id: "morning_brief",
+        schedule: "0 7 30 * * *",
+        timezone: "Europe/Madrid",
+        prompt: "Run morning brief per $heartbeat-ops skill.",
+      },
+      {
+        id: "weekly_review",
+        schedule: "0 19 0 * * 0",
+        timezone: "Europe/Madrid",
+        prompt: "Run weekly memory review per $heartbeat-ops skill.",
+      },
+    ],
+  },
+  memory: {
+    profile_path: "./data/memory/profile.json",
+    episodes_path: "./data/memory/episodes.jsonl",
+  },
+  paths: {
+    memory: "./data/memory",
+    approvals: "./data/approvals/items.json",
+  },
+}

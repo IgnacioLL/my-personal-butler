@@ -2,6 +2,9 @@
 
 Import service from capabilities.shopping.service directly when needed alongside
 harness clocks to avoid circular package init.
+
+Production config loader: capabilities.shopping.production (dry-run default;
+SHOPPING_LIVE gated; caps + freeze). CI keeps DryRunMerchant.
 """
 
 from capabilities.shopping.merchant import DryRunMerchant, MerchantProduct

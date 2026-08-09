@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from capabilities.reminders.store import ReminderKind, ReminderStore
-from capabilities.todos.store import TodoSource, TodoStore
+from capabilities.todos.store import TodoSource, TodoStatus, TodoStore
+from intelligence.memory.store import MemoryStore
 from capabilities.bookings.store import BookingStore
 from capabilities.shopping.store import PurchaseStore
 from harness.adapters import (
@@ -70,6 +71,8 @@ class ActionGateway:
     selfmod: StubSelfModAdapter = field(default_factory=StubSelfModAdapter)
     reminders: ReminderStore | None = None
     todos: TodoStore | None = None
+    memory: MemoryStore | None = None
+    heartbeat_service: Any | None = None
     bookings: BookingStore | None = None
     shopping: PurchaseStore | None = None
     selfmod_service: Any | None = None  # SelfModService when attached
@@ -144,6 +147,14 @@ class ActionGateway:
         self.selfmod_service = service
         if outbound is not None:
             self.outbound = outbound
+
+    def attach_memory(self, store: MemoryStore) -> None:
+        """Wire file-backed memory store for memory_read / memory_update."""
+        self.memory = store
+
+    def attach_heartbeat(self, service: Any) -> None:
+        """Wire heartbeat service for morning brief / weekly review tools."""
+        self.heartbeat_service = service
 
     def cancel_pending(self) -> list[str]:
         cancelled = self.approvals.cancel_pending()
@@ -406,14 +417,29 @@ class ActionGateway:
             return self._add_todo(payload)
         if action_type == "todo_complete":
             return self._complete_todo(payload)
+        if action_type == "todo_cancel":
+            return self._cancel_todo(payload)
+        if action_type == "todo_read":
+            return self._read_todos(payload)
+        if action_type == "reminder_list":
+            return self._list_reminders(payload)
+        if action_type == "reminder_snooze":
+            return self._snooze_reminder(payload)
+        if action_type == "reminder_cancel":
+            return self._cancel_reminder(payload)
+        if action_type == "memory_read":
+            return self._memory_read(payload)
+        if action_type == "memory_update":
+            return self._memory_update(payload)
+        if action_type == "heartbeat_morning_brief":
+            return self._heartbeat_morning_brief(payload)
+        if action_type == "heartbeat_weekly_review":
+            return self._heartbeat_weekly_review(payload)
         if action_type in {
             "diet_draft",
             "whatsapp_reply",
             "calendar_read",
-            "memory_read",
-            "todo_read",
             "source_read",
-            "memory_update",
             "self_mod_propose",
         }:
             return {"stub": True, "action_type": action_type, "payload": payload}
@@ -783,3 +809,124 @@ class ActionGateway:
             "due_at": rem.due_at.isoformat(),
             "escalation_step": habit.escalation_step,
         }
+
+    def _read_todos(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert self.todos is not None
+        status = str(payload.get("status") or "open")
+        tag = payload.get("tag")
+        if status == "all":
+            todos = self.todos.list_all()
+        elif status == "done":
+            todos = [t for t in self.todos.list_all() if t.status == TodoStatus.DONE]
+        else:
+            todos = self.todos.list_open()
+        if tag:
+            todos = [t for t in todos if tag in t.tags]
+        return {"todos": [t.to_dict() for t in todos], "count": len(todos)}
+
+    def _cancel_todo(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert self.todos is not None
+        todo_id = str(payload.get("todo_id") or "")
+        if not todo_id:
+            raise ApprovalError("invalid_payload", "todo_cancel requires todo_id")
+        todo = self.todos.cancel(todo_id)
+        return {"todo_id": todo.id, "status": todo.status.value}
+
+    def _list_reminders(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert self.reminders is not None
+        _ = payload
+        reminders = self.reminders.list_active()
+        return {
+            "reminders": [r.to_dict() for r in reminders],
+            "count": len(reminders),
+        }
+
+    def _snooze_reminder(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert self.reminders is not None
+        reminder_id = str(payload.get("reminder_id") or "")
+        until_raw = payload.get("until")
+        if not reminder_id or not until_raw:
+            raise ApprovalError(
+                "invalid_payload",
+                "reminder_snooze requires reminder_id and until",
+            )
+        if isinstance(until_raw, datetime):
+            until = until_raw
+        else:
+            until = datetime.fromisoformat(str(until_raw))
+        rem = self.reminders.snooze(reminder_id, until)
+        return {
+            "reminder_id": rem.id,
+            "status": rem.status.value,
+            "due_at": rem.due_at.isoformat(),
+        }
+
+    def _cancel_reminder(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert self.reminders is not None
+        reminder_id = str(payload.get("reminder_id") or "")
+        if not reminder_id:
+            raise ApprovalError("invalid_payload", "reminder_cancel requires reminder_id")
+        rem = self.reminders.cancel(reminder_id)
+        return {"reminder_id": rem.id, "status": rem.status.value}
+
+    def _memory_read(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.memory is None:
+            return {"stub": True, "action_type": "memory_read", "payload": payload}
+        mode = str(payload.get("mode") or "hot")
+        if mode == "episodes":
+            limit = int(payload.get("limit") or 50)
+            tag = payload.get("tag")
+            tag_str = str(tag) if tag is not None else None
+            episodes = self.memory.read_episodes(limit=limit, tag=tag_str)
+            return {"episodes": episodes, "count": len(episodes)}
+        if mode == "section":
+            section = str(payload.get("section") or "")
+            if not section:
+                raise ApprovalError("invalid_payload", "memory_read section mode requires section")
+            profile = self.memory.load_full_profile()
+            bucket = profile.get(section)
+            key = payload.get("key")
+            if key is not None:
+                if not isinstance(bucket, dict):
+                    raise ApprovalError("invalid_payload", f"section {section!r} is not a mapping")
+                return {"section": section, "key": str(key), "value": bucket.get(str(key))}
+            return {"section": section, "value": bucket}
+        hot = self.memory.load_hot_profile()
+        return {
+            "hot_profile": hot,
+            "lines": self.memory.hot_context_lines(),
+        }
+
+    def _memory_update(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.memory is None:
+            return {"stub": True, "action_type": "memory_update", "payload": payload}
+        section = str(payload.get("section") or "")
+        key = str(payload.get("key") or "")
+        if not section or not key:
+            raise ApprovalError(
+                "invalid_payload",
+                "memory_update requires section and key",
+            )
+        if "value" not in payload:
+            raise ApprovalError("invalid_payload", "memory_update requires value")
+        self.memory.remember(
+            section,
+            key,
+            payload["value"],
+            explicit=bool(payload.get("explicit", True)),
+        )
+        return {"section": section, "key": key, "updated": True}
+
+    def _heartbeat_morning_brief(self, payload: dict[str, Any]) -> dict[str, Any]:
+        _ = payload
+        if self.heartbeat_service is None:
+            return {"stub": True, "action_type": "heartbeat_morning_brief"}
+        result = self.heartbeat_service.maybe_morning_brief()
+        return result.to_dict()
+
+    def _heartbeat_weekly_review(self, payload: dict[str, Any]) -> dict[str, Any]:
+        _ = payload
+        if self.heartbeat_service is None:
+            return {"stub": True, "action_type": "heartbeat_weekly_review"}
+        result = self.heartbeat_service.maybe_weekly_review()
+        return result.to_dict()

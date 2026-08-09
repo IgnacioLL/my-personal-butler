@@ -17,11 +17,11 @@ This is powerful and dangerous. It is always **hard-approved**. The agent may pr
 
 ### In scope (with hard approve)
 
-- Skills / prompts / procedural markdown in this repo
-- Agent config fragments that are versioned here
-- Plan docs under `agent-plan/`
-- Custom glue code owned by this project
-- Tests / scripts that validate a change
+- Skills / prompts / procedural markdown in this repo (`src/skills/**`)
+- Agent config fragments that are versioned here (`config/**`, excluding local/secret files)
+- Plan docs under `agent-plan/` and operator docs under `docs/`
+- Custom glue code owned by this project (especially `src/policy/**` → policy-change)
+- Tests / scripts that validate a change (`tests/**`, `scripts/**`)
 
 ### Out of scope / Forbidden without a separate design
 
@@ -31,6 +31,22 @@ This is powerful and dangerous. It is always **hard-approved**. The agent may pr
 - Destructive git history rewrites (`force-push`, `reset --hard` on main)
 - Installing new system packages or opening network expose ports without a dedicated approval type
 - Editing files outside the allowlisted project paths
+
+## Production allowlist (this repo)
+
+Canonical rails: [`config/selfmod.allowlist.production.json`](../../config/selfmod.allowlist.production.json)
+
+| Allowed (examples) | Forbidden (examples) |
+| --- | --- |
+| `src/skills/**`, `docs/**`, `config/**`, `agent-plan/**`, `scripts/**`, `tests/**`, `src/policy/**` | `.env*`, `secrets/**`, `credentials/**`, `config/*.local.*`, `data/**`, `.git/**` |
+
+Production skill/config:
+
+- Skill: [`src/skills/self-modification/SKILL.md`](../../src/skills/self-modification/SKILL.md)
+- Config: [`config/selfmod.production.json`](../../config/selfmod.production.json)
+- CI fixture (INV-SELF): [`fixtures/selfmod/`](../../fixtures/selfmod/) + [`config/selfmod.harness.json`](../../config/selfmod.harness.json)
+
+Loader: `capabilities.selfmod.production` (`load_production_config`, `production_paths_smoke`).
 
 ## Hard-coded rule
 
@@ -72,7 +88,7 @@ Every self-mod approval must show:
 
 ## Safety rails
 
-1. **Path allowlist** — only configured project directories
+1. **Path allowlist** — only configured project directories (production file above; fixtures for CI)
 2. **Branch-first** — prefer `cursor/agent-self-…` branches; protect `main`
 3. **Diff ceiling** — huge patches require split Approves or Sol-tier review summary
 4. **Policy self-guard** — changes to approval/kill-switch code are a special approval subtype (“policy change”) and should be visually louder
@@ -100,11 +116,14 @@ Every self-mod approval must show:
 
 Use Gateway tools for workspace read/write **behind** the approval gate. Do not give the daily chat session unconstrained shell/`write` on the agent repo. Self-mod should be a dedicated skill with its own tool policy.
 
+Load the production skill from `src/skills/self-modification/` into the Gateway workspace (`skills/` or `skills.load.extraDirs`). CI must continue to use the fixture mini-repo — never apply self-mod to the live checkout inside `test:ci`.
+
 ## Acceptance criteria
 
-- [ ] Agent can read its allowlisted source and propose a diff
-- [ ] Apply path is unreachable without hard Accept
-- [ ] Approval card shows files + diff + rollback
-- [ ] `freeze self-mod` blocks writes immediately
-- [ ] Policy-matrix edits are labeled as higher-risk approvals
-- [ ] Successful apply is audited and reported on WhatsApp
+- [x] Agent can read its allowlisted source and propose a diff
+- [x] Apply path is unreachable without hard Accept
+- [x] Approval card shows files + diff + rollback
+- [x] `freeze self-mod` blocks writes immediately
+- [x] Policy-matrix edits are labeled as higher-risk approvals
+- [x] Successful apply is audited and reported on WhatsApp
+- [x] Production allowlist covers real repo skills/docs/config (not secrets); INV-SELF stays green on fixtures

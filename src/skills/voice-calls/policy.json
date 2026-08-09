@@ -1,0 +1,30 @@
+{
+  "skill": "voice-calls",
+  "invariant": "INV-APPR-005",
+  "call_mode": {
+    "allowed_tools": [
+      "calendar_read",
+      "memory_read",
+      "todo_read",
+      "source_read"
+    ],
+    "forbidden_tools": [
+      "buy",
+      "book",
+      "self_mod_apply"
+    ]
+  },
+  "after_call": {
+    "whatsapp_summary": true,
+    "channel": "whatsapp",
+    "kind": "after_call_summary"
+  },
+  "outbound": {
+    "allowlist_only": true,
+    "target": "operator"
+  },
+  "providers": {
+    "production": ["twilio", "telnyx"],
+    "ci": "mock"
+  }
+}

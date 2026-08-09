@@ -425,6 +425,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 02:55 | TASK-26 | Agent A | composer-2.5 | implement | GATE_MAP docs + verification stamp; status → review |
 | 2026-08-09 03:00 | TASK-26 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; ci-gates audit + E2E-07/08 deny paths; status → done |
 | 2026-08-09 00:05 | PROD-wave | planner | — | dispatch | Parallel PROD-01..09 in_progress; cheapest cloud = Oracle Free / Hetzner; full always-on (not stub) |
+| 2026-08-09 00:10 | PROD-04 | Agent A | composer-2.5 | implement | OpenClaw skills pack memory/reminders/todos/heartbeat; status → review |
 | 2026-08-09 00:01 | PROD-02 | Agent A | cursor-grok-4.5-high | implement | Production OpenClaw Codex/Luna + WhatsApp Baileys templates; status → review |
 | 2026-08-09 00:15 | PROD-01 | Agent A | composer-2.5 | implement | Docker compose + deploy runbook + systemd + backup scripts; status → review |
 
@@ -493,11 +494,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Package production OpenClaw skills under `src/skills/` (or OpenClaw skills dir convention) for memory R/W, reminders/habits, todos, morning brief/weekly review — real skill manifests that Gateway can load, not only Python harness services. Map harness logic → skill interfaces.
 - **Acceptance:** Skills loadable by OpenClaw layout; unit/contract still pass via harness adapters.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** Agent A — Four AgentSkills-compatible skills (`personal-memory`, `reminders-habits`, `personal-todos`, `heartbeat-ops`) with `SKILL.md` + harness-map references; `src/tools/{schemas.json,registry.py,bridge.py}`; `ActionGateway` real adapters for `memory_read`/`memory_update`/`todo_read`/reminder manage/heartbeat tools; `config/openclaw/skills-production.json5` + merge into `config/production/openclaw.skills.snippet.json`; `make test-ci` + `make test-ci-fail-closed` exit 0; unit checks `unit.skill_pack.*`.
+- **Artifacts:** `src/skills/`, `src/tools/`, `config/openclaw/skills-production.json5`, `config/production/openclaw.skills.snippet.json`, `src/policy/{action_gateway,approvals}.py`, `scripts/run_test_ci.py`
 
 ### PROD-05 — Android companion + approvals production wiring
 - **Depends on:** —

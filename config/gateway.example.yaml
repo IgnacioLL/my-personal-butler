@@ -31,7 +31,10 @@ channels:
   voice_calls:
     enabled: false
   android:
+    # Production fragment: config/android.example.yaml — pairing: docs/android-pairing.md
     enabled: false
+    # When enabling: merge android.example.yaml (todos, approvals inbox, Status kill
+    # switches, self-mod cards). CI uses config/android.harness.json doubles.
 
 intelligence:
   default_model: luna
@@ -46,6 +49,29 @@ cron:
 approvals:
   # Trust core hooks — see agent-plan/trust-and-safety/approval-matrix.md
   store_path: ./data/approvals/items.json
+
+# Bookings + shopping production skills (hard approve). Keep enabled:false until
+# Android approvals work. Dry-run default; live requires BOOKINGS_LIVE / SHOPPING_LIVE.
+# Snippet: config/production/openclaw.skills.snippet.json
+# Runbook: docs/bookings-shopping-production.md
+skills:
+  load:
+    extraDirs:
+      - ./src/skills
+    watch: true
+  entries:
+    bookings:
+      enabled: false
+      config:
+        productionConfig: ./config/production/bookings.json
+        harnessConfig: ./config/bookings.harness.json
+        mode: dry_run
+    shopping:
+      enabled: false
+      config:
+        productionConfig: ./config/production/shopping.json
+        harnessConfig: ./config/shopping.harness.json
+        mode: dry_run
 
 memory:
   profile_path: ./data/memory/profile.json
