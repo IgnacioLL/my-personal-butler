@@ -16,6 +16,7 @@ from capabilities.todos.store import TodoSource, TodoStatus, TodoStore
 from intelligence.memory.store import MemoryStore
 from capabilities.bookings.store import BookingStore
 from capabilities.shopping.store import PurchaseStore
+from capabilities.calendar.factory import CalendarAdapterImpl
 from harness.adapters import (
     StubCalendarAdapter,
     StubCommerceAdapter,
@@ -66,7 +67,8 @@ class ActionGateway:
     approvals: ApprovalStore = field(init=False)
     kill: KillSwitches = field(default_factory=KillSwitches)
     audit: AuditLog = field(init=False)
-    calendar: StubCalendarAdapter = field(default_factory=StubCalendarAdapter)
+    # Default: in-memory stub (CI). Production may inject GoogleCalendarAdapter.
+    calendar: CalendarAdapterImpl = field(default_factory=StubCalendarAdapter)
     commerce: StubCommerceAdapter = field(default_factory=StubCommerceAdapter)
     selfmod: StubSelfModAdapter = field(default_factory=StubSelfModAdapter)
     reminders: ReminderStore | None = None

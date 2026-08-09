@@ -1,0 +1,47 @@
+{
+  "skill": "calendar",
+  "profile": "production",
+  "mode": "google",
+  "provider": "google",
+  "live": false,
+  "live_flag": {
+    "env": "CALENDAR_LIVE",
+    "notes": "Live Google Calendar writes require live=true (or CALENDAR_LIVE=1) AND OAuth secrets. Default remains dry-run (shape payloads + local mirror only). Never set in CI."
+  },
+  "approval": {
+    "tier": "soft_confirm",
+    "mandatory": true,
+    "action_types": ["calendar_create", "calendar_modify", "calendar_cancel"],
+    "read_auto": ["calendar_read"]
+  },
+  "google": {
+    "calendar_id": "primary",
+    "timezone": "Europe/Madrid",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "api_base": "https://www.googleapis.com/calendar/v3",
+    "token_file": "",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar",
+      "https://www.googleapis.com/auth/calendar.events"
+    ],
+    "client_id": "",
+    "client_secret": "",
+    "refresh_token": "",
+    "access_token": ""
+  },
+  "conflict_aware": {
+    "enabled": true,
+    "suggest_free_slots": true,
+    "suggest_limit": 3,
+    "notes": "Propose path calls out conflicts and suggests free slots before soft confirm. Writes still gated until Accept."
+  },
+  "ci": {
+    "adapter": "stub_memory",
+    "harness_config": "config/calendar.harness.json",
+    "live_forbidden": true,
+    "invariants": ["INV-APPR-003"]
+  },
+  "openclaw_skill": "src/skills/calendar",
+  "secrets_template": "config/production/calendar.env.example",
+  "notes": "Production Google Calendar adapter. Soft confirm mandatory before create/modify/cancel. Secrets via calendar.env.example → calendar.local.env. Stdlib HTTP only (no google-api package)."
+}

@@ -97,6 +97,7 @@ from capabilities.calendar.google import (  # noqa: E402
 from capabilities.calendar.parse import looks_like_schedule, parse_schedule  # noqa: E402
 from capabilities.calendar.service import CalendarService  # noqa: E402
 from capabilities.calendar.store import CalendarStore  # noqa: E402
+from harness.adapters import StubCalendarAdapter  # noqa: E402
 from capabilities.bookings.parse import looks_like_booking, parse_booking  # noqa: E402
 from capabilities.bookings.portal import StubBooksyPortal  # noqa: E402
 from capabilities.bookings.production import (  # noqa: E402

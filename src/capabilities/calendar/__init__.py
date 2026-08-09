@@ -1,7 +1,10 @@
-"""Calendar capability — in-memory store, conflict-aware suggestions, soft-confirm writes.
+"""Calendar capability — in-memory store + soft-confirm writes.
 
 Import service from capabilities.calendar.service directly when needed alongside
 harness clocks to avoid circular package init.
+
+Factory/google are imported lazily via capabilities.calendar.factory /
+capabilities.calendar.google to avoid circular import with harness.adapters.
 """
 
 from capabilities.calendar.parse import ParsedCalendarEvent, looks_like_schedule, parse_schedule

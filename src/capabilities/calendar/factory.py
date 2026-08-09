@@ -18,9 +18,8 @@ from capabilities.calendar.google import (
     load_google_calendar_config,
 )
 from capabilities.calendar.store import CalendarStore
-from harness.adapters import StubCalendarAdapter
 
-CalendarAdapterImpl = Union[StubCalendarAdapter, GoogleCalendarAdapter]
+CalendarAdapterImpl = Union[Any, GoogleCalendarAdapter]
 
 DEFAULT_HARNESS_PROFILE = "config/calendar.harness.json"
 DEFAULT_PRODUCTION_PROFILE = "config/calendar.production.example.json"
@@ -120,6 +119,7 @@ def build_calendar_adapter(
             adapter.attach_store(store)
         return adapter
 
+    from harness.adapters import StubCalendarAdapter
     adapter = StubCalendarAdapter()
     if store is not None:
         adapter.attach_store(store)
