@@ -1,0 +1,31 @@
+{
+  "goals": {
+    "diet_phase": "",
+    "habit_targets": [],
+    "trip_wishlist": []
+  },
+  "identity": {
+    "household": "",
+    "language": "en",
+    "name": "",
+    "people": [],
+    "timezone": "UTC"
+  },
+  "preferences": {
+    "allergies": [],
+    "booking_windows": [],
+    "brands": [],
+    "food_dislikes": [],
+    "food_likes": [],
+    "haircut_style": "",
+    "quiet_hours": {
+      "end": "07:30",
+      "start": "22:00"
+    }
+  },
+  "procedures": {
+    "booksy_flow": "",
+    "spend_approval": ""
+  },
+  "version": 1
+}

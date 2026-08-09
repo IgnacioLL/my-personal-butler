@@ -72,7 +72,7 @@ For a thin Python dispatch layer in custom plugins, use [`../tools/bridge.py`](.
 
 Ensure data paths match hosting profile:
 
-- `data/memory/profile.json` + `episodes.jsonl`
+- `data/memory/profile.json` + `episodes.jsonl` (versioned in-repo; committed on durable updates)
 - `data/approvals/items.json`
 
 Seed profile: `fixtures/memory/seed-profile.json`. Backup manifest: `config/backup.example.json`.

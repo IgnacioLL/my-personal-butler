@@ -38,7 +38,9 @@ Canonical rails: [`config/selfmod.allowlist.production.json`](../../config/selfm
 
 | Allowed (examples) | Forbidden (examples) |
 | --- | --- |
-| `src/skills/**`, `docs/**`, `config/**`, `agent-plan/**`, `scripts/**`, `tests/**`, `src/policy/**` | `.env*`, `secrets/**`, `credentials/**`, `config/*.local.*`, `data/**`, `.git/**` |
+| `src/skills/**`, `docs/**`, `config/**`, `agent-plan/**`, `scripts/**`, `tests/**`, `src/policy/**`, `data/memory/**` | `.env*`, `secrets/**`, `credentials/**`, `config/*.local.*`, `data/secrets/**`, `data/approvals/**`, `data/todos/**`, `.git/**` |
+
+Personal memory (`data/memory/profile.json`, `episodes.jsonl`) is versioned like skills: durable updates commit into this repository (Soft tier via `memory_update`, not silent host-only files).
 
 Production skill/config:
 

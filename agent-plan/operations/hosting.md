@@ -19,7 +19,7 @@ Start on a **small always-on VPS** (or equivalent always-on mini PC) running Ope
 - WhatsApp channel connected
 - voice-call webhooks via stable HTTPS URL
 - Android node paired ([pairing runbook](../../docs/android-pairing.md), [`config/android.example.yaml`](../../config/android.example.yaml))
-- backups of config + memory
+- backups of config + memory (`data/memory/**` is also git-versioned in this repo)
 
 ## Network / exposure
 
