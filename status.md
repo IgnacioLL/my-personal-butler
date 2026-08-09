@@ -425,6 +425,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 02:55 | TASK-26 | Agent A | composer-2.5 | implement | GATE_MAP docs + verification stamp; status → review |
 | 2026-08-09 03:00 | TASK-26 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; ci-gates audit + E2E-07/08 deny paths; status → done |
 | 2026-08-09 00:05 | PROD-wave | planner | — | dispatch | Parallel PROD-01..09 in_progress; cheapest cloud = Oracle Free / Hetzner; full always-on (not stub) |
+| 2026-08-09 00:08 | PROD-09 | Agent A | cursor-grok-4.5-high | implement | Production self-mod allowlist + skill; INV-SELF green; status → review |
 | 2026-08-09 00:15 | PROD-08 | Agent A | cursor-grok-4.5-high | implement | Bookings+shopping production skills; hard approve; dry-run+live flags; status → review |
 | 2026-08-09 00:10 | PROD-04 | Agent A | composer-2.5 | implement | OpenClaw skills pack memory/reminders/todos/heartbeat; status → review |
 | 2026-08-09 00:08 | PROD-04 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; skill manifests loadable (not stub); unit.skill_pack.* green; calendar __init__ circular-import fix; status → done |
@@ -536,7 +537,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Scope:** Full call path config: provider credentials template, webhook URL, outbound allowlist, INV-APPR-005 tool allowlist in production skill policy, after-call WhatsApp summary. Mock provider stays for CI.
 - **Acceptance:** Production voice plugin/config + runbook; CI mock path green.
 - **Result:** PASS (Agent A implement) — Production Twilio/Telnyx path: `config/production/openclaw.voice-call.json` + `voice-call.env.example` (webhook URL notes), outbound operator allowlist, `src/skills/voice-calls` + `call-mode.policy.json` (`INV-APPR-005` — no buy/book/self_mod_apply mid-call), after-call WhatsApp summary via `ProductionVoiceProvider`/`MockVoiceProvider`. Runbook `docs/voice-calls.md`; plan leaf aligned. CI stays on mock (`unit.voice.prod07_*` + existing mock/INV-APPR-005).
-- **Artifacts:** `config/production/{openclaw.voice-call.json,voice-call.env.example,call-mode.policy.json}`, `src/skills/voice-calls/`, `src/channels/voice/{config,production}.py`, `src/policy/call_mode.py`, `docs/voice-calls.md`, `agent-plan/channels/voice-calls.md`, `config/gateway.example.yaml`, `scripts/run_test_ci.py`
+- **Artifacts:** `config/production/{openclaw.voice-call.json,voice-call.env.example,call-mode.policy.json}`, `src/skills/voice-calls/`, `src/channels/voice/{config,production}.py`, `src/policy/call_mode.py`, `docs/voice-calls.md`, `agent-plan/channels/voice-calls.md`, `config/gateway.example.yaml`, `scripts/prod07_voice_checks.py`, `scripts/run_test_ci.py`
 
 ### PROD-08 — Bookings + shopping production skills (hard approve)
 - **Depends on:** —
