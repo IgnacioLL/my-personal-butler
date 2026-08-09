@@ -1,0 +1,137 @@
+// OpenClaw Gateway — PRODUCTION template (no secrets).
+// Copy to ~/.openclaw/openclaw.json (or openclaw.local.json5) and replace placeholders.
+//
+// Aligns with:
+//   agent-plan/channels/whatsapp.md
+//   agent-plan/intelligence/models-and-credits.md
+//   agent-plan/intelligence/transcription.md
+//
+// This is the FULL production path (WhatsApp Web / Baileys).
+// CI/harness continues to use src/harness/whatsapp_transport.py mocks — do not
+// point test:ci at this file.
+//
+// Upstream docs:
+//   https://docs.openclaw.ai/channels/whatsapp.md
+//   https://docs.openclaw.ai/providers/openai/
+//   https://docs.openclaw.ai/nodes/media-understanding
+//   https://docs.openclaw.ai/tools/tts
+
+{
+  // --- Auth intent: Codex / ChatGPT subscription (primary credit path) ---
+  // Sign in on the Gateway host (no secrets in this file):
+  //   openclaw models auth login --provider openai
+  //   # headless / VPS: add --device-code
+  // List profiles, then set auth.order.openai to the ChatGPT/Codex profile id.
+  plugins: {
+    entries: {
+      codex: { enabled: true },
+      whatsapp: { enabled: true },
+    },
+  },
+
+  auth: {
+    order: {
+      // Prefer subscription OAuth profile over any API-key backup.
+      // Replace "openai:default" with the id from:
+      //   openclaw models auth list --provider openai
+      openai: ["openai:default"],
+    },
+  },
+
+  // --- Models: GPT-5.6 Luna default; Terra/Sol escalation ladder ---
+  agents: {
+    defaults: {
+      model: {
+        // Default brain per models-and-credits.md — ordinary chat, reminders, light planning.
+        primary: "openai/gpt-5.6-luna",
+        // Provider failover order (not the same as intent escalation — see escalation.hooks.json).
+        fallbacks: ["openai/gpt-5.6-terra", "openai/gpt-5.6-sol"],
+      },
+      // Cheap utility turns stay on Luna (titles, short narration).
+      utilityModel: "openai/gpt-5.6-luna",
+      models: {
+        "openai/gpt-5.6-luna": { alias: "Luna" },
+        "openai/gpt-5.6-terra": { alias: "Terra" },
+        "openai/gpt-5.6-sol": { alias: "Sol" },
+      },
+    },
+  },
+
+  // --- WhatsApp Web (Baileys): personal DM allowlist only ---
+  // Login (QR): openclaw channels login --channel whatsapp
+  // See README.md in this directory for the full QR flow.
+  channels: {
+    whatsapp: {
+      enabled: true,
+      // Personal DM only — reject everyone not in allowFrom.
+      dmPolicy: "allowlist",
+      // OPERATOR: replace with your E.164 number (include country code).
+      allowFrom: ["+15555550100"],
+      // Personal-phone / self-chat friendly baseline (OpenClaw personal-number mode).
+      selfChatMode: true,
+      // Groups disabled for v1 (agent-plan/channels/whatsapp.md — out of scope).
+      groupPolicy: "disabled",
+      groupAllowFrom: [],
+      // Inbound media size cap (MB) before STT / agent turn.
+      mediaMaxMb: 16,
+      sendReadReceipts: false,
+      textChunkLimit: 4000,
+      configWrites: false,
+    },
+  },
+
+  // Keep Baileys web session plumbing available for the linked device.
+  web: {
+    enabled: true,
+  },
+
+  // --- Media pipeline: STT before agent turn (mandatory for voice notes) ---
+  // WhatsApp voice notes → tools.media.audio transcription → "[Audio] <transcript>"
+  // body for the agent. Dedicated STT — not Luna. See transcription.md.
+  tools: {
+    media: {
+      concurrency: 2,
+      models: [
+        {
+          type: "provider",
+          provider: "openai",
+          model: "gpt-4o-transcribe",
+          capabilities: ["audio"],
+        },
+        {
+          type: "provider",
+          provider: "openai",
+          model: "gpt-4o-mini-transcribe",
+          capabilities: ["audio"],
+        },
+      ],
+      audio: {
+        enabled: true,
+        preferredModel: "openai/gpt-4o-transcribe",
+        // Bound oversized / long notes; failure should clarify, not invent intent.
+        maxBytes: 20971520, // 20 MiB
+        timeoutSeconds: 60,
+        // Echo uncertain / high-stakes transcripts before acting (plan UX).
+        echoTranscript: true,
+        echoFormat: '📝 "{transcript}"',
+        attachments: { mode: "first", maxAttachments: 1 },
+        // Scope STT to WhatsApp DMs in production (groups are disabled anyway).
+        scope: {
+          channels: ["whatsapp"],
+          chatTypes: ["direct"],
+        },
+      },
+      // Images/docs later; keep auto-detect off until needed.
+      image: { enabled: false },
+      video: { enabled: false },
+    },
+  },
+
+  // Speak back only when the operator sent a voice note (inbound TTS mode).
+  messages: {
+    tts: {
+      auto: "inbound",
+      provider: "openai",
+    },
+  },
+}

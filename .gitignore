@@ -6,6 +6,7 @@ artifacts/test/**/*
 # Local config with secrets (use *.example templates)
 config/gateway.local.*
 config/harness.local.*
+config/openclaw/openclaw.local.*
 .env
 .env.*
 

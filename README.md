@@ -27,7 +27,7 @@ We **do not** ship a custom orchestration runtime. The OpenClaw Gateway is the c
 ## Getting started
 
 1. Read [`agent-plan/index.md`](./agent-plan/index.md) and the testing docs under [`agent-plan/testing/`](./agent-plan/testing/index.md).
-2. Copy config placeholders from [`config/`](./config/README.md) when wiring a local or harness Gateway profile.
+2. Copy config placeholders from [`config/`](./config/README.md) when wiring a local or harness Gateway profile. Production OpenClaw (Codex/Luna + WhatsApp QR): [`config/openclaw/`](./config/openclaw/README.md).
 3. Track implementation progress in [`status.md`](./status.md).
 
 ## Running tests

@@ -1,0 +1,144 @@
+{
+  "description": "Production model escalation hooks for OpenClaw (Codex/Luna). Aligns with agent-plan/intelligence/models-and-credits.md and the harness router in src/intelligence/models/router.py. CI continues to use stub routing — this file is the production policy intent.",
+  "credit_path": "codex_chatgpt_subscription",
+  "auth_intent": {
+    "provider": "openai",
+    "preferred_profile_order": ["openai:default"],
+    "login_commands": [
+      "openclaw models auth login --provider openai",
+      "openclaw models auth login --provider openai --device-code"
+    ],
+    "list_profiles": "openclaw models auth list --provider openai",
+    "notes": "Do not commit OAuth tokens. Prefer ChatGPT/Codex subscription profile over API-key billing. If subscription is exhausted, notify on WhatsApp/Android rather than silently falling through to unexpected API spend (policy TBD in go-live)."
+  },
+  "models": {
+    "default": {
+      "role": "luna",
+      "ref": "openai/gpt-5.6-luna",
+      "alias": "Luna",
+      "used_for": [
+        "chat",
+        "reminders",
+        "todos",
+        "calendar_read",
+        "diet_swap",
+        "approval_summary",
+        "faq_from_memory",
+        "light_tool_routing",
+        "tiny_doc_skill_wording"
+      ]
+    },
+    "balanced": {
+      "role": "terra",
+      "ref": "openai/gpt-5.6-terra",
+      "alias": "Terra",
+      "used_for": [
+        "medium_planning",
+        "multi_constraint_day"
+      ]
+    },
+    "heavy": {
+      "role": "sol",
+      "ref": "openai/gpt-5.6-sol",
+      "alias": "Sol",
+      "used_for": [
+        "hard_weekly_plans",
+        "messy_booking_conflicts",
+        "deep_research",
+        "non_trivial_self_mod"
+      ]
+    },
+    "stt": {
+      "independent_from_chat": true,
+      "primary_ref": "openai/gpt-4o-transcribe",
+      "fallback_ref": "openai/gpt-4o-mini-transcribe",
+      "config_path": "tools.media.audio"
+    },
+    "tts": {
+      "mode": "inbound",
+      "config_path": "messages.tts.auto"
+    }
+  },
+  "escalation_hooks": [
+    {
+      "id": "multi_day_calendar_diet_travel",
+      "when": {
+        "multi_day_plan": true,
+        "min_constraint_types": 2,
+        "constraint_flags": [
+          "has_calendar_constraints",
+          "has_diet_constraints",
+          "has_travel_constraints"
+        ]
+      },
+      "escalate_to": "sol",
+      "reason": "multi-day plan with calendar + diet + travel constraints"
+    },
+    {
+      "id": "booking_retry_or_messy_conflict",
+      "when": {
+        "any_of": ["booking_retry", "booking_messy_conflict"]
+      },
+      "escalate_to": "sol",
+      "reason": "booking flow failed once or needs richer browser reasoning"
+    },
+    {
+      "id": "explicit_deep_plan",
+      "when": {
+        "deep_plan_request": true,
+        "utterance_markers": [
+          "deep plan",
+          "detailed plan",
+          "full weekly plan",
+          "think hard",
+          "deep research"
+        ]
+      },
+      "escalate_to": "sol",
+      "reason": "user explicitly asks for a deep plan"
+    },
+    {
+      "id": "non_trivial_self_mod",
+      "when": {
+        "any_of_conditions": [
+          { "self_mod_files_gte": 2 },
+          { "policy_change": true }
+        ]
+      },
+      "escalate_to": "sol",
+      "reason": "non-trivial self-modification (multi-file code or policy changes)"
+    },
+    {
+      "id": "medium_multi_constraint_day",
+      "when": {
+        "intent": "planning",
+        "min_constraint_types": 2,
+        "multi_day_plan": false
+      },
+      "escalate_to": "terra",
+      "reason": "medium planning / multi-constraint day (optional Terra rung)"
+    }
+  ],
+  "stay_on_luna": [
+    "reminders",
+    "todos",
+    "faqs_from_memory",
+    "whats_on_my_calendar",
+    "simple_diet_swaps",
+    "approval_summaries",
+    "tiny_doc_skill_wording"
+  ],
+  "openclaw_runtime_hooks": {
+    "primary_config": "agents.defaults.model.primary = openai/gpt-5.6-luna",
+    "failover_config": "agents.defaults.model.fallbacks = [terra, sol]",
+    "session_override": "/model openai/gpt-5.6-terra | /model openai/gpt-5.6-sol | /model Luna|Terra|Sol",
+    "skill_overrides": "Optional per-skill model override for booking/shopping planner and self-mod coding (PROD-04/08/09).",
+    "note": "Intent escalation (this file) is distinct from provider failover (fallbacks). Prefer short tool loops; keep STT on tools.media.audio."
+  },
+  "harness_alignment": {
+    "router_module": "src/intelligence/models/router.py",
+    "fixture_table": "fixtures/models/routing-intents.json",
+    "invariants": ["INV-MODEL-001", "INV-MODEL-002"],
+    "ci_uses_live_luna": false
+  }
+}
