@@ -1,4 +1,8 @@
-"""File-backed personal memory: hot profile + episodic JSON store."""
+"""File-backed personal memory: hot profile + episodic JSON store.
+
+Canonical production paths live under ``data/memory/`` in this repository and
+are git-committed after durable writes (see ``intelligence.memory.commit``).
+"""
 
 from __future__ import annotations
 
@@ -9,12 +13,14 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from intelligence.memory.secrets import MemorySecretsError, validate_no_secrets
+from intelligence.memory.commit import MemoryCommitResult, MemoryGitCommitter
+from intelligence.memory.secrets import validate_no_secrets
 
 PROFILE_FILENAME = "profile.json"
 EPISODES_FILENAME = "episodes.jsonl"
 
 HOT_SECTIONS = ("identity", "preferences", "goals")
+REPO_MEMORY_DIR = Path("data") / "memory"
 
 
 def default_profile_template() -> dict[str, Any]:
@@ -52,16 +58,49 @@ def default_profile_template() -> dict[str, Any]:
 class MemoryStore:
     """Hot profile (always loadable) + episodic append-only log on disk."""
 
-    def __init__(self, root: Path | str) -> None:
+    def __init__(
+        self,
+        root: Path | str,
+        *,
+        committer: MemoryGitCommitter | None = None,
+        auto_commit: bool | None = None,
+    ) -> None:
         self.root = Path(root)
         self.profile_path = self.root / PROFILE_FILENAME
         self.episodes_path = self.root / EPISODES_FILENAME
         self._profile: dict[str, Any] | None = None
+        self.committer = committer
+        # Default: commit when store is under repo data/memory/ or committer set.
+        if auto_commit is None:
+            auto_commit = committer is not None or self._looks_like_repo_memory()
+        self.auto_commit = bool(auto_commit)
+        self.last_commit: MemoryCommitResult | None = None
+
+    def _looks_like_repo_memory(self) -> bool:
+        try:
+            parts = self.root.resolve().parts
+        except OSError:
+            return False
+        return len(parts) >= 2 and parts[-2] == "data" and parts[-1] == "memory"
+
+    def attach_committer(self, committer: MemoryGitCommitter | None) -> None:
+        """Wire (or clear) the git committer used after durable writes."""
+        self.committer = committer
+        if committer is not None:
+            self.auto_commit = True
 
     @classmethod
-    def seed(cls, root: Path | str, template: dict[str, Any] | None = None) -> "MemoryStore":
+    def seed(
+        cls,
+        root: Path | str,
+        template: dict[str, Any] | None = None,
+        *,
+        committer: MemoryGitCommitter | None = None,
+        auto_commit: bool | None = None,
+        commit_message: str | None = None,
+    ) -> "MemoryStore":
         """Create a fresh store directory with profile template."""
-        store = cls(root)
+        store = cls(root, committer=committer, auto_commit=auto_commit)
         store.root.mkdir(parents=True, exist_ok=True)
         profile = template if template is not None else default_profile_template()
         validate_no_secrets(profile)
@@ -72,20 +111,55 @@ class MemoryStore:
         if not store.episodes_path.exists():
             store.episodes_path.write_text("", encoding="utf-8")
         store._profile = profile
+        if commit_message:
+            store._commit_memory_paths(
+                [store.profile_path, store.episodes_path],
+                message=commit_message,
+            )
         return store
 
     @classmethod
-    def seed_from_fixture(cls, root: Path | str, fixture_path: Path | str) -> "MemoryStore":
+    def seed_from_fixture(
+        cls,
+        root: Path | str,
+        fixture_path: Path | str,
+        *,
+        committer: MemoryGitCommitter | None = None,
+        auto_commit: bool | None = None,
+    ) -> "MemoryStore":
         """Seed a store at *root* from a fixture JSON template."""
         data = json.loads(Path(fixture_path).read_text(encoding="utf-8"))
-        return cls.seed(root, template=data)
+        return cls.seed(
+            root,
+            template=data,
+            committer=committer,
+            auto_commit=auto_commit,
+        )
 
     @classmethod
-    def open(cls, root: Path | str) -> "MemoryStore":
-        store = cls(root)
+    def open(
+        cls,
+        root: Path | str,
+        *,
+        committer: MemoryGitCommitter | None = None,
+        auto_commit: bool | None = None,
+    ) -> "MemoryStore":
+        store = cls(root, committer=committer, auto_commit=auto_commit)
         if not store.profile_path.exists():
             raise FileNotFoundError(f"missing profile at {store.profile_path}")
         return store
+
+    @classmethod
+    def open_repo_memory(
+        cls,
+        repo_root: Path | str,
+        *,
+        committer: MemoryGitCommitter | None = None,
+    ) -> "MemoryStore":
+        """Open the versioned ``data/memory`` store inside this repository."""
+        root = Path(repo_root) / REPO_MEMORY_DIR
+        git = committer or MemoryGitCommitter(repo_root=repo_root)
+        return cls.open(root, committer=git, auto_commit=True)
 
     def load_hot_profile(self) -> dict[str, Any]:
         """Identity + preferences + goals — compact facts for every turn."""
@@ -152,6 +226,10 @@ class MemoryStore:
             raise ValueError(f"section {section!r} is not a mapping")
         bucket[key] = value
         self._write_profile(profile)
+        self._commit_memory_paths(
+            [self.profile_path],
+            message=f"memory: update {section}.{key}",
+        )
 
     def append_episode(self, summary: str, *, tags: list[str] | None = None) -> str:
         """Append one episodic memory line (search on demand, not hot)."""
@@ -166,8 +244,13 @@ class MemoryStore:
             "tags": tags or [],
         }
         validate_no_secrets(record)
+        self.root.mkdir(parents=True, exist_ok=True)
         with self.episodes_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+        self._commit_memory_paths(
+            [self.episodes_path],
+            message=f"memory: episode {episode_id}",
+        )
         return episode_id
 
     def read_episodes(
@@ -200,6 +283,24 @@ class MemoryStore:
         )
         self._profile = profile
 
+    def _commit_memory_paths(
+        self,
+        paths: list[Path],
+        *,
+        message: str,
+    ) -> MemoryCommitResult | None:
+        """Commit versioned memory files when auto_commit is enabled."""
+        if not self.auto_commit:
+            return None
+        committer = self.committer or MemoryGitCommitter()
+        result = committer.commit_paths(
+            paths,
+            message=message,
+            cwd_hint=self.root,
+        )
+        self.last_commit = result
+        return result
+
     def copy_template_from(self, template_path: Path | str) -> None:
         """Seed this store from an on-disk fixture template."""
         template = json.loads(Path(template_path).read_text(encoding="utf-8"))
@@ -207,6 +308,10 @@ class MemoryStore:
         self._write_profile(template)
         if not self.episodes_path.exists():
             self.episodes_path.write_text("", encoding="utf-8")
+        self._commit_memory_paths(
+            [self.profile_path, self.episodes_path],
+            message="memory: seed profile template",
+        )
 
     def wipe(self) -> None:
         """Remove store directory (harness cleanup)."""

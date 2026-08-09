@@ -63,6 +63,7 @@ from policy.ingress import evaluate_ingress, normalize_sender  # noqa: E402
 from policy.injection_guard import is_auto_approve_injection, scan_untrusted_text  # noqa: E402
 from policy.quiet_hours import is_in_quiet_hours  # noqa: E402
 from operations.heartbeat import HeartbeatService  # noqa: E402
+from intelligence.memory.commit import MemoryGitCommitter  # noqa: E402
 from intelligence.memory.secrets import MemorySecretsError, redact_secrets  # noqa: E402
 from intelligence.memory.store import MemoryStore  # noqa: E402
 from intelligence.models.fixtures import load_routing_fixture  # noqa: E402
@@ -3482,6 +3483,21 @@ def _run_prod_09_unit_checks(root: Path) -> list[dict[str, Any]]:
                 "detail": "production allowlist forbids .env and *.local.* config",
             }
         )
+        # Versioned personal memory is allowlisted; other data/* stays closed.
+        memory_ok = path_allowed("data/memory/profile.json", prod.allowlist)
+        other_data_blocked = not path_allowed(
+            "data/approvals/items.json", prod.allowlist
+        ) and not path_allowed("data/todos/items.json", prod.allowlist)
+        checks.append(
+            {
+                "id": "unit.selfmod.prod09_memory_allowlisted",
+                "result": "PASS" if (memory_ok and other_data_blocked) else "FAIL",
+                "detail": (
+                    f"memory_allowed={memory_ok} "
+                    f"other_data_blocked={other_data_blocked}"
+                ),
+            }
+        )
     except Exception as exc:  # noqa: BLE001 — surface load errors as FAIL checks
         checks.append(
             {
@@ -4165,6 +4181,82 @@ def _run_memory_integration_checks(root: Path) -> list[dict[str, Any]]:
                 "id": "integration.memory.secrets_not_on_disk",
                 "result": "PASS" if secrets_ok else "FAIL",
                 "detail": f"secret_blocked={secret_blocked}",
+            }
+        )
+
+    # Versioned memory commits under data/memory/** (record_only; no real git).
+    with tempfile.TemporaryDirectory(prefix="task04-mem-commit-") as tmp:
+        fake_repo = Path(tmp)
+        (fake_repo / ".git").mkdir()
+        versioned = fake_repo / "data" / "memory"
+        recorder = MemoryGitCommitter(repo_root=fake_repo, record_only=True)
+        live = MemoryStore.seed_from_fixture(
+            versioned,
+            fixture,
+            committer=recorder,
+            auto_commit=True,
+        )
+        before = len(recorder.history)
+        live.remember("preferences", "haircut_style", "repo-commit-style", explicit=True)
+        after = recorder.history[-1] if recorder.history else None
+        commit_ok = (
+            after is not None
+            and after.committed
+            and "data/memory/profile.json" in after.paths
+            and len(recorder.history) > before
+            and "repo-commit-style"
+            in live.profile_path.read_text(encoding="utf-8")
+        )
+        checks.append(
+            {
+                "id": "integration.memory.repo_commit_on_update",
+                "result": "PASS" if commit_ok else "FAIL",
+                "detail": (
+                    f"committed={getattr(after, 'committed', None)} "
+                    f"paths={getattr(after, 'paths', None)} "
+                    f"sha={getattr(after, 'sha', None)}"
+                ),
+            }
+        )
+
+        # Gateway memory_update surfaces commit metadata.
+        clock = FakeClock(start=datetime(2026, 1, 5, 10, 0, 0, tzinfo=ZoneInfo("UTC")))
+        gw = ActionGateway(clock=clock)
+        gw.attach_memory(live)
+        prop = gw.propose(
+            "memory_update",
+            "remember diet phase",
+            {
+                "section": "goals",
+                "key": "diet_phase",
+                "value": "committed-via-gateway",
+                "explicit": True,
+            },
+            source_channel="whatsapp",
+            source_utterance="remember diet phase",
+        )
+        if not prop.approval_id:
+            gw_ok = False
+            executed = None
+            result = None
+        else:
+            gw.accept(prop.approval_id)
+            executed = gw.execute(prop.approval_id)
+            result = executed.result if executed is not None else None
+            gw_ok = (
+                prop.ok
+                and executed.ok
+                and isinstance(result, dict)
+                and result.get("updated") is True
+                and result.get("repo_committed") is True
+                and isinstance(result.get("commit"), dict)
+                and result["commit"].get("committed") is True
+            )
+        checks.append(
+            {
+                "id": "integration.memory.gateway_commit_metadata",
+                "result": "PASS" if gw_ok else "FAIL",
+                "detail": f"prop={prop.reason} exec={executed} result={result}",
             }
         )
 

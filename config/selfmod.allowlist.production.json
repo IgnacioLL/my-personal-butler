@@ -1,5 +1,5 @@
 {
-  "description": "Production path allowlist for this personal-butler repo (PROD-09). Skills, docs, versioned config, plan docs, policy — not secrets.",
+  "description": "Production path allowlist for this personal-butler repo (PROD-09). Skills, docs, versioned config, plan docs, policy, and versioned personal memory — not secrets.",
   "workspace_root": ".",
   "allowed_globs": [
     "src/skills/**",
@@ -9,6 +9,7 @@
     "scripts/**",
     "tests/**",
     "src/policy/**",
+    "data/memory/**",
     "README.md",
     "Makefile",
     "status.md"
@@ -35,7 +36,9 @@
     "config/*.local.*",
     "config/**/*.local.*",
     "**/harness.local.env",
-    "data/**",
+    "data/secrets/**",
+    "data/approvals/**",
+    "data/todos/**",
     "**/*.pem",
     "**/*.key",
     "**/id_rsa*",
@@ -45,5 +48,5 @@
   ],
   "branch_prefix": "cursor/agent-self-",
   "diff_ceiling_lines": 400,
-  "notes": "Writes outside allowed_globs fail closed. Forbidden globs win over allowed. Policy-path matches require policy-change subtype + hard approve. Fixture workspace stays for CI (fixtures/selfmod/)."
+  "notes": "Writes outside allowed_globs fail closed. Forbidden globs win over allowed. data/memory/** is versioned in-repo (committed on memory_update); other data/* runtime stores stay out of self-mod. Policy-path matches require policy-change subtype + hard approve. Fixture workspace stays for CI (fixtures/selfmod/)."
 }

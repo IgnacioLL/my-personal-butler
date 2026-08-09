@@ -1,12 +1,12 @@
 ---
 name: personal-memory
-description: "Read hot profile facts, append episodic notes, and soft-confirm durable memory updates — never store secrets."
+description: "Read hot profile facts, append episodic notes, and soft-confirm durable memory updates that commit into data/memory/ — never store secrets."
 metadata: { "openclaw": { "requires": { "config": ["skills.entries.personal-memory.enabled"] }, "homepage": "https://docs.openclaw.ai/tools/skills" } }
 ---
 
 # Personal memory
 
-Curated **hot profile** (identity, preferences, goals) plus **episodic** log on disk. Maps to `intelligence/memory/store.py` in this repo.
+Curated **hot profile** (identity, preferences, goals) plus **episodic** log, versioned under `data/memory/` in this repository. Maps to `intelligence/memory/store.py` + `commit.py`.
 
 ## When to use
 
@@ -20,7 +20,7 @@ Curated **hot profile** (identity, preferences, goals) plus **episodic** log on 
 | Tool | Tier | Harness module | Notes |
 | --- | --- | --- | --- |
 | `memory_read` | Auto | `MemoryStore.load_hot_profile`, `read_episodes` | Default `mode=hot`; `mode=episodes` for search |
-| `memory_update` | Soft confirm | `MemoryStore.remember` | Propose → Accept → execute; never auto-write sensitive facts |
+| `memory_update` | Soft confirm | `MemoryStore.remember` + git commit | Propose → Accept → write `data/memory/**` → local git commit; never auto-write sensitive facts |
 
 ### `memory_read` payload
 
@@ -51,14 +51,15 @@ Curated **hot profile** (identity, preferences, goals) plus **episodic** log on 
 
 Show a one-line confirm before proposing when the fact is sensitive.
 
-## Storage paths (production)
+## Storage paths (production — committed in this repo)
 
 From `config/openclaw/skills-production.json5` / `gateway.example.yaml`:
 
-- Profile: `data/memory/profile.json`
-- Episodes: `data/memory/episodes.jsonl`
+- Profile: `data/memory/profile.json` (tracked)
+- Episodes: `data/memory/episodes.jsonl` (tracked)
+- On Accept: `MemoryGitCommitter` stages those paths and commits (`BUTLER_MEMORY_GIT_COMMIT=0` disables)
 
-Seed from `{baseDir}/../../fixtures/memory/seed-profile.json` on first boot.
+CI / first-boot seed fixture: `{baseDir}/../../fixtures/memory/seed-profile.json` (not a substitute for the versioned tree).
 
 ## Safety
 

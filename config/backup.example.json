@@ -9,12 +9,12 @@
     {
       "id": "memory_profile",
       "path": "data/memory/profile.json",
-      "notes": "Hot personal memory profile"
+      "notes": "Hot personal memory profile — versioned in git; committed on memory_update"
     },
     {
       "id": "memory_episodes",
       "path": "data/memory/episodes.jsonl",
-      "notes": "Episodic memory append log"
+      "notes": "Episodic memory append log — versioned in git with profile commits"
     },
     {
       "id": "approvals_db",

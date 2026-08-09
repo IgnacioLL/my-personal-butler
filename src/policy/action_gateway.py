@@ -917,7 +917,16 @@ class ActionGateway:
             payload["value"],
             explicit=bool(payload.get("explicit", True)),
         )
-        return {"section": section, "key": key, "updated": True}
+        commit = None
+        if self.memory.last_commit is not None:
+            commit = self.memory.last_commit.to_dict()
+        return {
+            "section": section,
+            "key": key,
+            "updated": True,
+            "repo_committed": bool(commit and commit.get("committed")),
+            "commit": commit,
+        }
 
     def _heartbeat_morning_brief(self, payload: dict[str, Any]) -> dict[str, Any]:
         _ = payload

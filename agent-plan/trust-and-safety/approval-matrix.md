@@ -20,7 +20,7 @@
 | Send WhatsApp reply to you | Auto |
 | Create calendar event | Soft |
 | Modify/cancel your event | Soft |
-| Update personal memory prefs | Soft (or Auto for explicit “remember…”) |
+| Update personal memory prefs (writes + commits `data/memory/**` in this repo) | Soft (or Auto for explicit “remember…”) |
 | Book Booksy / external appointment | Hard |
 | Buy anything | Hard |
 | Read own allowlisted source | Auto |

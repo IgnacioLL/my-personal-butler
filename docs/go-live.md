@@ -224,7 +224,7 @@ Agent may propose code/docs/config changes **in this repo** on allowlisted paths
 
 | Allowed | Denied |
 | --- | --- |
-| `src/skills/**`, `docs/**`, `config/**`, `src/policy/**` | `.env`, `*.local.*`, `data/**`, secrets paths |
+| `src/skills/**`, `docs/**`, `config/**`, `src/policy/**`, `data/memory/**` | `.env`, `*.local.*`, `data/secrets/**`, `data/approvals/**`, `data/todos/**`, secrets paths |
 
 ### Smoke
 

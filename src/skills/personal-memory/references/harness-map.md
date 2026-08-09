@@ -3,7 +3,7 @@
 | Production tool | `ActionGateway` action | Python implementation |
 | --- | --- | --- |
 | `memory_read` | `memory_read` | `intelligence.memory.store.MemoryStore` |
-| `memory_update` | `memory_update` | `MemoryStore.remember` (after soft Accept) |
+| `memory_update` | `memory_update` | `MemoryStore.remember` + `MemoryGitCommitter` (after soft Accept; commits `data/memory/**`) |
 
 CI integration: `scripts/run_test_ci.py` → `integration.memory.*` and `INV-MEM-001`.
 

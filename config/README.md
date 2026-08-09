@@ -55,7 +55,7 @@ Per [`agent-plan/operations/hosting.md`](../agent-plan/operations/hosting.md):
 | --- | --- | --- |
 | Approvals | `data/approvals/items.json` | yes (TASK-05 / E2E-10) |
 | Todos | `data/todos/items.json` | yes (Android projection / PROD-05) |
-| Memory profile | `data/memory/profile.json` | yes (TASK-04) |
+| Memory profile | `data/memory/profile.json` | yes (TASK-04; git-committed on update) |
 | Episodic log | `data/memory/episodes.jsonl` | yes (TASK-04) |
 | Gateway config | `config/gateway.local.yaml` | yes (backup manifest) |
 
