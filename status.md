@@ -428,6 +428,8 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:10 | PROD-04 | Agent A | composer-2.5 | implement | OpenClaw skills pack memory/reminders/todos/heartbeat; status → review |
 | 2026-08-09 00:01 | PROD-02 | Agent A | cursor-grok-4.5-high | implement | Production OpenClaw Codex/Luna + WhatsApp Baileys templates; status → review |
 | 2026-08-09 00:15 | PROD-01 | Agent A | composer-2.5 | implement | Docker compose + deploy runbook + systemd + backup scripts; status → review |
+| 2026-08-09 00:04 | PROD-03 | Agent A | cursor-grok-4.5-high | implement | Production STT+TTS config + inbound TTS; fixture STT kept; status → review |
+| 2026-08-09 00:20 | PROD-07 | Agent A | cursor-grok-4.5-high | implement | Twilio/Telnyx voice production + INV-APPR-005 policy; status → review |
 
 ---
 
@@ -484,11 +486,12 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Production transcription + TTS provider config and skill/wiring for OpenClaw media path. Primary: OpenAI transcription (`gpt-4o-transcribe` / mini) with Whisper fallback notes; TTS for inbound-audio replies. Env templates for keys. Keep fixture STT in harness for CI.
 - **Acceptance:** Documented + config-wired production STT/TTS; CI fixtures unchanged.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Production voice path additive: `config/production/openclaw.voice.json` (OpenAI `gpt-4o-transcribe` → mini + `messages.tts.auto: inbound` / `gpt-4o-mini-tts`), Whisper CLI fallback fragment + notes, `voice.env.example` for `OPENAI_API_KEY`. Loader `src/intelligence/transcription/production.py` (structural only, no live HTTP). Aligned `agent-plan/intelligence/transcription.md` + `docs/production-voice.md`; enriched `config/openclaw/openclaw.production.json5` TTS providers. Fixture `SttStub` remains CI default (`unit.prod03.*`). Ready for Agent B.
+- **Artifacts:** `config/production/openclaw.voice.json`, `config/production/openclaw.voice.whisper-fallback.json`, `config/production/voice.env.example`, `config/production/README.md`, `docs/production-voice.md`, `src/intelligence/transcription/production.py`, `agent-plan/intelligence/transcription.md`
+
 
 ### PROD-04 — OpenClaw skills pack: memory, reminders, todos, heartbeat
 - **Depends on:** —
@@ -524,11 +527,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Full call path config: provider credentials template, webhook URL, outbound allowlist, INV-APPR-005 tool allowlist in production skill policy, after-call WhatsApp summary. Mock provider stays for CI.
 - **Acceptance:** Production voice plugin/config + runbook; CI mock path green.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Production Twilio/Telnyx path: `config/production/openclaw.voice-call.json` + `voice-call.env.example` (webhook URL notes), outbound operator allowlist, `src/skills/voice-calls` + `call-mode.policy.json` (`INV-APPR-005` — no buy/book/self_mod_apply mid-call), after-call WhatsApp summary via `ProductionVoiceProvider`/`MockVoiceProvider`. Runbook `docs/voice-calls.md`; plan leaf aligned. CI stays on mock (`unit.voice.prod07_*` + existing mock/INV-APPR-005).
+- **Artifacts:** `config/production/{openclaw.voice-call.json,voice-call.env.example,call-mode.policy.json}`, `src/skills/voice-calls/`, `src/channels/voice/{config,production}.py`, `src/policy/call_mode.py`, `docs/voice-calls.md`, `agent-plan/channels/voice-calls.md`, `config/gateway.example.yaml`, `scripts/run_test_ci.py`
 
 ### PROD-08 — Bookings + shopping production skills (hard approve)
 - **Depends on:** —

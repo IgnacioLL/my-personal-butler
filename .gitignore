@@ -10,6 +10,9 @@ config/openclaw/openclaw.local.*
 config/production/*.local.env
 config/production/voice.local.env
 config/production/voice-call.local.env
+config/production/calendar.local.env
+config/calendar.local.*
+data/secrets/
 .env
 .env.*
 !deploy/.env.example

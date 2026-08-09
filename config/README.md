@@ -5,6 +5,8 @@ Placeholders for OpenClaw Gateway and harness profiles. **Do not commit secrets.
 | File | Purpose |
 | --- | --- |
 | [`openclaw/`](./openclaw/) | **Production** OpenClaw templates — Codex/Luna, WhatsApp Baileys allowlist, STT media hooks (PROD-02). Not used by `test:ci`. |
+| [`production/openclaw.voice.json`](./production/openclaw.voice.json) | Production STT + inbound TTS merge fragment (PROD-03) |
+| [`production/voice.env.example`](./production/voice.env.example) | STT/TTS API key template — copy to `voice.local.env` |
 | [`gateway.example.yaml`](./gateway.example.yaml) | Always-on Gateway template (VPS/home) — copy to `gateway.local.yaml` |
 | [`gateway.harness.json`](./gateway.harness.json) | Harness/CI profile (stdlib JSON) — data paths + hosting flags |
 | [`android.example.yaml`](./android.example.yaml) | Production Android node control plane (todos, inbox, Status, self-mod) — PROD-05 |
@@ -19,6 +21,8 @@ Placeholders for OpenClaw Gateway and harness profiles. **Do not commit secrets.
 | [`harness.example.env`](./harness.example.env) | Virtual User / CI harness flags — copy to `harness.local.env` |
 
 Production WhatsApp QR login + Codex auth: [`openclaw/README.md`](./openclaw/README.md).
+
+Production WhatsApp voice STT + inbound TTS (PROD-03): [`production/README.md`](./production/README.md) · [`../docs/production-voice.md`](../docs/production-voice.md). Harness CI keeps fixture STT.
 
 ## Hosting (always-on Gateway)
 

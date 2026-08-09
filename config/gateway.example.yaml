@@ -40,8 +40,21 @@ intelligence:
   default_model: luna
   escalation_model: terra-sol
   transcription:
-    # Dedicated STT — see agent-plan/intelligence/transcription.md
-    provider: placeholder
+    # Dedicated STT — independent of Luna. Production fragment:
+    #   config/production/openclaw.voice.json  (OpenClaw tools.media.audio)
+    # Docs: agent-plan/intelligence/transcription.md, docs/production-voice.md
+    provider: openai
+    primary_model: gpt-4o-transcribe
+    fallback_model: gpt-4o-mini-transcribe
+    whisper_cli_fallback: optional  # config/production/openclaw.voice.whisper-fallback.json
+    openclaw_fragment: ./config/production/openclaw.voice.json
+    env_template: ./config/production/voice.env.example
+  tts:
+    # Speak back only when inbound was audio (OpenClaw messages.tts.auto).
+    auto: inbound
+    provider: openai
+    model: gpt-4o-mini-tts
+    voice: alloy
 
 cron:
   heartbeat_enabled: false

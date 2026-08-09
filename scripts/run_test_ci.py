@@ -134,8 +134,23 @@ from channels.voice.allowlist import (  # noqa: E402
     call_mode_block_reason,
     is_call_mode_allowed,
 )
+from channels.voice.config import (  # noqa: E402
+    load_plugin_fragment,
+    load_voice_call_config,
+)
+from channels.voice.production import (  # noqa: E402
+    ProductionVoiceProvider,
+    build_voice_provider,
+)
 from channels.voice.provider import MockVoiceProvider  # noqa: E402
 from capabilities.reminders.escalation import EscalationLadder  # noqa: E402
+from policy.call_mode import (  # noqa: E402
+    PRODUCTION_POLICY_PATH,
+    SKILL_POLICY_PATH,
+    gate_tool,
+    load_call_mode_policy,
+    policy_matches_allowlist,
+)
 from policy.spend_caps import SpendCapConfig, SpendLedger  # noqa: E402
 
 
@@ -909,9 +924,7 @@ def _run_prod03_voice_unit_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
-def _run_models_unit_checks_PLACEHOLDER_DO_NOT_USE(root: Path) -> list[dict[str, Any]]:
-    """Placeholder to keep old_string unique — replaced below."""
-    return []
+def _run_models_unit_checks(root: Path) -> list[dict[str, Any]]:
     """Models router: fixture table, Luna default, Terra/Sol escalation, stub registry."""
     checks: list[dict[str, Any]] = []
     fixture_path = root / "fixtures" / "models" / "routing-intents.json"
@@ -1906,6 +1919,122 @@ def _run_calendar_unit_checks(root: Path) -> list[dict[str, Any]]:
         }
     )
 
+    checks.extend(_run_prod_06_calendar_unit_checks(root))
+    return checks
+
+
+def _run_prod_06_calendar_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """PROD-06: Google production adapter + factory; harness stays in-memory."""
+    checks: list[dict[str, Any]] = []
+    try:
+        profile = load_calendar_profile(root=root, env={})
+        adapter = build_calendar_adapter(profile, root=root, env={})
+        harness_ok = (
+            profile.mode == "memory"
+            and isinstance(adapter, StubCalendarAdapter)
+            and (root / "config" / "calendar.harness.json").is_file()
+            and (root / "config" / "production" / "calendar.json").is_file()
+            and (root / "config" / "production" / "calendar.env.example").is_file()
+            and (root / "src" / "skills" / "calendar" / "SKILL.md").is_file()
+            and (root / "docs" / "calendar-production.md").is_file()
+        )
+        checks.append(
+            {
+                "id": "unit.calendar.prod06_factory_harness_default",
+                "result": "PASS" if harness_ok else "FAIL",
+                "detail": (
+                    f"mode={profile.mode} adapter={type(adapter).__name__} "
+                    f"harness={harness_ok}"
+                ),
+            }
+        )
+
+        prod_cfg = load_google_calendar_config(
+            env={},
+            config_path=root / "config" / "production" / "calendar.json",
+        )
+        google_profile = load_calendar_profile(
+            root / "config" / "production" / "calendar.json",
+            env={"CALENDAR_MODE": "google"},
+            root=root,
+        )
+        google_adapter = build_calendar_adapter(
+            google_profile, root=root, env={"CALENDAR_MODE": "google"}
+        )
+        secrets = (root / "config" / "production" / "calendar.env.example").read_text(
+            encoding="utf-8"
+        )
+        prod_ok = (
+            isinstance(google_adapter, GoogleCalendarAdapter)
+            and google_profile.mode == "google"
+            and prod_cfg.live is False
+            and google_adapter.live is False
+            and "GOOGLE_CALENDAR_CLIENT_SECRET" in secrets
+            and "CALENDAR_LIVE" in secrets
+            and "never commit" in secrets.lower()
+            or "Never commit" in secrets
+        )
+        # Fix boolean precedence: secrets check grouped.
+        prod_ok = (
+            isinstance(google_adapter, GoogleCalendarAdapter)
+            and google_profile.mode == "google"
+            and prod_cfg.live is False
+            and google_adapter.live is False
+            and "GOOGLE_CALENDAR_CLIENT_SECRET" in secrets
+            and "CALENDAR_LIVE" in secrets
+            and ("never commit" in secrets.lower())
+        )
+        checks.append(
+            {
+                "id": "unit.calendar.prod06_google_config_dry_run",
+                "result": "PASS" if prod_ok else "FAIL",
+                "detail": (
+                    f"mode={google_profile.mode} live={google_adapter.live} "
+                    f"configured={prod_cfg.configured} "
+                    f"public={prod_cfg.to_public_dict()}"
+                ),
+            }
+        )
+
+        # Dry-run create shapes Google payload; no network; increments create_count.
+        dry = GoogleCalendarAdapter(
+            config=GoogleCalendarConfig(live=False, calendar_id="primary", timezone="UTC")
+        )
+        created = dry.create(
+            {
+                "title": "Focus block",
+                "start": "2026-01-09T09:00:00+01:00",
+                "end": "2026-01-09T11:00:00+01:00",
+                "timezone": "Europe/Madrid",
+            }
+        )
+        dry_ok = (
+            dry.create_count == 1
+            and created.get("provider") == "google"
+            and created.get("live") is False
+            and len(dry.http_calls) == 1
+            and dry.http_calls[0].get("method") == "POST"
+            and dry.http_calls[0].get("live") is False
+            and (dry.http_calls[0].get("body") or {}).get("summary") == "Focus block"
+        )
+        checks.append(
+            {
+                "id": "unit.calendar.prod06_google_dry_run_create",
+                "result": "PASS" if dry_ok else "FAIL",
+                "detail": (
+                    f"create={dry.create_count} calls={dry.http_calls} "
+                    f"event={created.get('id')}"
+                ),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(
+            {
+                "id": "unit.calendar.prod06_factory_harness_default",
+                "result": "FAIL",
+                "detail": f"error:{exc}",
+            }
+        )
     return checks
 
 
