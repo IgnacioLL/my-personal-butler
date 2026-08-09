@@ -7,8 +7,12 @@ artifacts/test/**/*
 config/gateway.local.*
 config/harness.local.*
 config/openclaw/openclaw.local.*
+config/production/*.local.env
+config/production/voice.local.env
+config/production/voice-call.local.env
 .env
 .env.*
+!deploy/.env.example
 
 # Python
 __pycache__/

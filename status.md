@@ -543,11 +543,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** in_progress
+- **Status:** review
 - **Scope:** Production self-mod skill targeting this repo’s allowlisted paths; hard approve; freeze self-mod; policy-change subtype; rollback refs. Fixture workspace stays for CI.
 - **Acceptance:** Allowlist for real repo paths + production skill; INV-SELF green in CI.
-- **Result:** _(agent)_
-- **Artifacts:** _(agent)_
+- **Result:** PASS (Agent A implement) — Production allowlist `config/selfmod.allowlist.production.json` covers `src/skills/**`, `docs/**`, `config/**`, `agent-plan/**`, `scripts/**`, `tests/**`, `src/policy/**` and forbids secrets/local/data/`.env`. OpenClaw skill `src/skills/self-modification/SKILL.md` + `config/selfmod.production.json` encode hard approve, freeze_self_mod, policy-change subtype, rollback refs / `cursor/agent-self-*`. Loader `src/capabilities/selfmod/production.py` + CI unit checks `unit.selfmod.prod09_*`. `make test-ci` / `make test-ci-fail-closed` / `make e2e-08` green; INV-SELF-001..004 intact on fixtures. Agent-plan `self-modification.md` aligned. Ready for Agent B review.
+- **Artifacts:** `config/selfmod.allowlist.production.json`, `config/selfmod.production.json`, `config/selfmod.harness.json`, `src/skills/self-modification/SKILL.md`, `src/skills/README.md`, `src/capabilities/selfmod/production.py`, `agent-plan/capabilities/self-modification.md`, `artifacts/test/prod-09/` (`verification.json`, `report.json`, `production-config.json`, `allowlist.json`)
 
 ### PROD-10 — Operator go-live checklist + secrets inventory
 - **Depends on:** PROD-01 (soft)
