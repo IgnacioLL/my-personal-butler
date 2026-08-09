@@ -429,9 +429,11 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:10 | PROD-04 | Agent A | composer-2.5 | implement | OpenClaw skills pack memory/reminders/todos/heartbeat; status → review |
 | 2026-08-09 00:01 | PROD-02 | Agent A | cursor-grok-4.5-high | implement | Production OpenClaw Codex/Luna + WhatsApp Baileys templates; status → review |
 | 2026-08-09 00:15 | PROD-01 | Agent A | composer-2.5 | implement | Docker compose + deploy runbook + systemd + backup scripts; status → review |
+| 2026-08-09 00:30 | PROD-01 | Agent B | composer-2.5 | review | PASS — test-ci/fail-closed exit 0; prod01 compose/runbook/scripts structurally valid (Oracle+Hetzner); INV-* intact; status → done |
 | 2026-08-09 00:04 | PROD-03 | Agent A | cursor-grok-4.5-high | implement | Production STT+TTS config + inbound TTS; fixture STT kept; status → review |
 | 2026-08-09 00:20 | PROD-07 | Agent A | cursor-grok-4.5-high | implement | Twilio/Telnyx voice production + INV-APPR-005 policy; status → review |
 | 2026-08-09 00:25 | PROD-06 | Agent A | cursor-grok-4.5-high | implement | Google Calendar OAuth adapter + soft confirm; status → review |
+| 2026-08-09 00:06 | PROD-02 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; Luna/allowFrom/groups/Codex spot-checks; status → done |
 
 ---
 
@@ -468,20 +470,20 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** composer-2.5
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Full always-on deploy (not minimal). `deploy/docker-compose.yml` (or equivalent) for OpenClaw Gateway + volumes for credentials/memory/approvals; `docs/deploy.md` covering Oracle Always Free ARM **and** Hetzner CX22; systemd alternative; backup/restore of `~/.openclaw`; reboot survival; HTTPS/tunnel notes for later Twilio webhooks. Operator checklist from zero → Gateway up.
 - **Acceptance:** Operator can follow docs to bring Gateway up on a small VPS; compose validated structurally (agents cannot install OpenClaw if blocked — document exact commands).
-- **Result:** PASS (Agent A) — Official OpenClaw image compose (`ghcr.io/openclaw/openclaw`) with `~/.openclaw` + workspace + auth-profile bind mounts, `restart: unless-stopped`, loopback-default ports. Operator scripts: `setup-docker.sh`, `backup-openclaw.sh`, `install-systemd.sh`. systemd unit template for non-Docker. `docs/deploy.md` covers Oracle ARM + Hetzner CX22, UFW, reboot survival, backup/restore cron, HTTPS/Twilio notes, zero→up checklist. CI structural checks: `integration.deploy.prod01_*` (no Docker install).
-- **Artifacts:** `deploy/docker-compose.yml`, `deploy/.env.example`, `deploy/setup-docker.sh`, `deploy/backup-openclaw.sh`, `deploy/openclaw-gateway.service`, `deploy/install-systemd.sh`, `deploy/README.md`, `docs/deploy.md`, `scripts/run_test_ci.py` (`_run_prod01_deploy_checks`)
+- **Result:** PASS (Agent B review) — `make test-ci` exit 0; `make test-ci-fail-closed` exit 0. Structural validation: `deploy/docker-compose.yml` (official `ghcr.io/openclaw/openclaw`, `~/.openclaw`/workspace/auth bind mounts, `restart: unless-stopped`, loopback 18789/18790, healthcheck); executable operator scripts `setup-docker.sh`, `backup-openclaw.sh`, `install-systemd.sh`; systemd unit `openclaw-gateway.service`. `docs/deploy.md` covers Oracle Always Free ARM + Hetzner CX22 zero→up checklist, UFW, reboot survival, backup/restore cron, HTTPS/Twilio notes. CI `integration.deploy.prod01_*` all PASS. INV-* unchanged.
+- **Artifacts:** `deploy/docker-compose.yml`, `deploy/.env.example`, `deploy/setup-docker.sh`, `deploy/backup-openclaw.sh`, `deploy/openclaw-gateway.service`, `deploy/install-systemd.sh`, `deploy/README.md`, `docs/deploy.md`, `artifacts/test/ci/report.json` (`integration.deploy.prod01_*`)
 
 ### PROD-02 — OpenClaw production config: Codex/Luna + WhatsApp allowlist
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Production `config/openclaw/` (or `config/production/`) — Codex auth profile intent, **Luna default**, Terra/Sol escalation hooks, WhatsApp channel (Baileys) `allowFrom` your number, groups disabled, DM policy, media/STT pipeline hooks. No stub transport as the production path. Align with OpenClaw docs (WhatsApp Web QR login).
 - **Acceptance:** Copy-ready production config templates + README; harness still uses mocks for CI.
-- **Result:** PASS (Agent A implement) — Added production OpenClaw templates under `config/openclaw/`: Codex/ChatGPT subscription auth order intent, default model `openai/gpt-5.6-luna` with Terra/Sol fallbacks + `escalation.hooks.json` aligned to models-and-credits + harness router, WhatsApp Web (Baileys) `dmPolicy: allowlist` / `allowFrom` placeholder / `groupPolicy: disabled` / self-chat DM baseline, `tools.media.audio` STT-before-agent + inbound TTS. README covers `openclaw channels login --channel whatsapp` QR flow. Harness/CI mocks unchanged. `make test-ci` green.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: Luna default `agents.defaults.model.primary` / `utilityModel` = `openai/gpt-5.6-luna` (+ Terra/Sol fallbacks); WhatsApp `dmPolicy: allowlist` + `allowFrom` placeholder; `groupPolicy: disabled` / empty `groupAllowFrom`; Codex auth intent (`plugins.entries.codex`, `auth.order.openai`, escalation `credit_path: codex_chatgpt_subscription`); README QR login via `openclaw channels login --channel whatsapp`; harness still mocks (no `openclaw.production` in CI). INV-* intact (no weaken). No config gaps requiring fix.
 - **Artifacts:** `config/openclaw/openclaw.production.json5`, `config/openclaw/escalation.hooks.json`, `config/openclaw/README.md`, `config/README.md`, `README.md`, `.gitignore`
 
 ### PROD-03 — STT + TTS production providers (full voice path)

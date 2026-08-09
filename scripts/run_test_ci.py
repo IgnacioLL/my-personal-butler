@@ -153,6 +153,11 @@ from policy.call_mode import (  # noqa: E402
 )
 from policy.spend_caps import SpendCapConfig, SpendLedger  # noqa: E402
 
+# PROD-05 Android unit gates — isolated module to avoid parallel edit conflicts.
+    run_android_status_unit_checks,
+    run_prod05_android_config_checks,
+)
+
 
 def run_unit(out_dir: Path) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
@@ -337,8 +342,8 @@ def run_unit(out_dir: Path) -> dict[str, Any]:
     checks.extend(_run_voice_unit_checks())
     checks.extend(_run_todo_unit_checks())
     checks.extend(_run_android_approval_unit_checks())
-    checks.extend(_run_android_status_unit_checks())
-    checks.extend(_run_prod05_android_config_checks(ROOT))
+    checks.extend(run_android_status_unit_checks())
+    checks.extend(run_prod05_android_config_checks(ROOT))
     checks.extend(_run_calendar_unit_checks(ROOT))
     checks.extend(_run_diet_unit_checks(ROOT))
     checks.extend(_run_booking_unit_checks(ROOT))
