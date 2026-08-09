@@ -6,6 +6,7 @@ Copy-ready **production** templates for the always-on OpenClaw Gateway.
 | --- | --- |
 | [`openclaw.production.json5`](./openclaw.production.json5) | Gateway config: Codex auth order, **GPT-5.6 Luna** default, Terra/Sol fallbacks, WhatsApp Web (Baileys) allowlist, media STT hooks, inbound TTS |
 | [`escalation.hooks.json`](./escalation.hooks.json) | Intent escalation policy (Luna → Terra/Sol) aligned with `models-and-credits.md` + harness router |
+| [`skills-production.json5`](./skills-production.json5) | Optional PROD-04 overlay — enable memory/reminders/todos/heartbeat skills + cron (merge into Gateway config) |
 
 **Not the CI path.** Harness/CI keeps mocks (`config/gateway.harness.json`, `src/harness/whatsapp_transport.py`). Do not wire `test:ci` to these files.
 
