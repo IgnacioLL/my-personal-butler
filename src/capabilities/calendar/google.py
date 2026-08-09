@@ -111,7 +111,14 @@ def load_google_calendar_config(
     if not isinstance(google, dict):
         google = {}
 
-    live_default = bool(google.get("live", False))
+    # Nested google.live wins; else top-level production JSON "live"
+    # (docs/calendar-production.md — operator sets "live": true on the profile).
+    if "live" in google:
+        live_default = bool(google.get("live"))
+    elif "live" in data:
+        live_default = bool(data.get("live"))
+    else:
+        live_default = False
     live = _env_bool("CALENDAR_LIVE", live_default) if env is None else (
         str(environ.get("CALENDAR_LIVE", str(live_default))).lower()
         in {"1", "true", "yes", "on"}

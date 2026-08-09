@@ -1999,6 +1999,7 @@ def _run_prod_06_calendar_unit_checks(root: Path) -> list[dict[str, Any]]:
             and google_profile.mode == "google"
             and prod_cfg.live is False
             and google_adapter.live is False
+            and prod_cfg.timezone == "Europe/Madrid"
             and "GOOGLE_CALENDAR_CLIENT_SECRET" in secrets
             and "CALENDAR_LIVE" in secrets
             and ("never commit" in secrets.lower())
@@ -2012,6 +2013,28 @@ def _run_prod_06_calendar_unit_checks(root: Path) -> list[dict[str, Any]]:
                     f"configured={prod_cfg.configured} "
                     f"public={prod_cfg.to_public_dict()}"
                 ),
+            }
+        )
+
+        # Top-level production JSON live must be honored when nested google omits it.
+        with tempfile.TemporaryDirectory() as tmp:
+            live_path = Path(tmp) / "calendar-live-top.json"
+            live_path.write_text(
+                json.dumps(
+                    {
+                        "live": True,
+                        "google": {"calendar_id": "primary", "timezone": "UTC"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            live_cfg = load_google_calendar_config(env={}, config_path=live_path)
+        live_flag_ok = prod_cfg.live is False and live_cfg.live is True
+        checks.append(
+            {
+                "id": "unit.calendar.prod06_toplevel_live_flag",
+                "result": "PASS" if live_flag_ok else "FAIL",
+                "detail": f"prod_live={prod_cfg.live} synthetic_top_live={live_cfg.live}",
             }
         )
 
