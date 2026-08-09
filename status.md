@@ -436,6 +436,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:20 | PROD-07 | Agent A | cursor-grok-4.5-high | implement | Twilio/Telnyx voice production + INV-APPR-005 policy; status → review |
 | 2026-08-09 00:25 | PROD-06 | Agent A | cursor-grok-4.5-high | implement | Google Calendar OAuth adapter + soft confirm; status → review |
 | 2026-08-09 00:06 | PROD-02 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; Luna/allowFrom/groups/Codex spot-checks; status → done |
+| 2026-08-09 00:08 | PROD-09 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; real-repo allowlist/hard-approve/freeze/INV-SELF spot-checks; status → done |
 
 ---
 
@@ -553,10 +554,10 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Depends on:** —
 - **Model:** cursor-grok-4.5-high
 - **Agents:** A implement · B review
-- **Status:** review
+- **Status:** done
 - **Scope:** Production self-mod skill targeting this repo’s allowlisted paths; hard approve; freeze self-mod; policy-change subtype; rollback refs. Fixture workspace stays for CI.
 - **Acceptance:** Allowlist for real repo paths + production skill; INV-SELF green in CI.
-- **Result:** PASS (Agent A implement) — Production allowlist `config/selfmod.allowlist.production.json` covers `src/skills/**`, `docs/**`, `config/**`, `agent-plan/**`, `scripts/**`, `tests/**`, `src/policy/**` and forbids secrets/local/data/`.env`. OpenClaw skill `src/skills/self-modification/SKILL.md` + `config/selfmod.production.json` encode hard approve, freeze_self_mod, policy-change subtype, rollback refs / `cursor/agent-self-*`. Loader `src/capabilities/selfmod/production.py` + CI unit checks `unit.selfmod.prod09_*`. `make test-ci` / `make test-ci-fail-closed` / `make e2e-08` green; INV-SELF-001..004 intact on fixtures. Agent-plan `self-modification.md` aligned. Ready for Agent B review.
+- **Result:** PASS (Agent B review) — Re-ran `make test-ci` exit 0 and `make test-ci-fail-closed` exit 0. Spot-checks: production allowlist allows `src/skills/**`/`docs/**`/`config/**`/`src/policy/**` and denies `.env`/`*.local.*`/`data/**`; hard approve tiers for `self_mod_apply`/`policy_change`; `freeze_self_mod` blocks Accept apply (`apply=0`); `unit.selfmod.prod09_*` + INV-SELF-001..004 PASS; `artifacts/test/prod-09/verification.json` PASS. No PROD-09 code gaps; INV-SELF not weakened.
 - **Artifacts:** `config/selfmod.allowlist.production.json`, `config/selfmod.production.json`, `config/selfmod.harness.json`, `src/skills/self-modification/SKILL.md`, `src/skills/README.md`, `src/capabilities/selfmod/production.py`, `agent-plan/capabilities/self-modification.md`, `artifacts/test/prod-09/` (`verification.json`, `report.json`, `production-config.json`, `allowlist.json`)
 
 ### PROD-10 — Operator go-live checklist + secrets inventory

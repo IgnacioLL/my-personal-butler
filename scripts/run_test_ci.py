@@ -25,6 +25,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+from prod07_voice_checks import run_prod07_voice_unit_checks  # noqa: E402
 from harness.artifacts import write_report  # noqa: E402
 from harness.clock import FakeClock  # noqa: E402
 from harness.gateway_harness import GatewayHarness  # noqa: E402
@@ -1546,6 +1547,7 @@ def _run_voice_unit_checks() -> list[dict[str, Any]]:
             ),
         }
     )
+    checks.extend(run_prod07_voice_unit_checks(ROOT))
     return checks
 
 
