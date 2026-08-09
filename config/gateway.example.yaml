@@ -1,0 +1,127 @@
+# OpenClaw Gateway — example profile (no secrets).
+# Copy to gateway.local.yaml and fill in channel tokens outside git.
+#
+# Docs: agent-plan/architecture.md, agent-plan/operations/hosting.md
+# Harness CI loads config/gateway.harness.json (stdlib JSON); this YAML is the
+# human-editable template for VPS / always-on deployment.
+
+gateway:
+  name: personal-agent
+  # session_policy: one primary personal DM session (see architecture.md)
+
+hosting:
+  # Recommended: small always-on VPS — see agent-plan/operations/hosting.md
+  mode: vps  # vps | home | harness
+  public_url: https://gateway.example.com
+  daemon:
+    enabled: true
+    unit: openclaw-gateway.service
+    restart: on-failure
+  whatsapp_reconnect: auto  # reconnect session after Gateway reboot
+  backup:
+    schedule_cron: "0 3 * * *"
+    manifest: ./config/backup.example.json
+    script: ./scripts/backup-restore-placeholder.sh
+
+channels:
+  whatsapp:
+    enabled: false
+    allowlist_dm_only: true
+    groups_enabled: false
+  voice_calls:
+    # Production: merge config/production/openclaw.voice-call.json into OpenClaw
+    # plugins.entries.voice-call (Twilio/Telnyx). CI uses MockVoiceProvider.
+    # Runbook: docs/voice-calls.md
+    enabled: false
+    provider: mock  # mock | twilio | telnyx
+    from_number: "+15550001234"
+    to_number: "+15550005678"  # operator handset
+    outbound_allowlist:
+      - "+15550005678"
+    webhook:
+      public_url: https://gateway.example.com/voice/webhook
+      path: /voice/webhook
+      port: 3334
+    inbound_policy: disabled
+    call_mode_policy: ./config/production/call-mode.policy.json
+    after_call_whatsapp_summary: true
+    max_calls_per_hour: 3
+  android:
+    # Production fragment: config/android.example.yaml — pairing: docs/android-pairing.md
+    enabled: false
+    # When enabling: merge android.example.yaml (todos, approvals inbox, Status kill
+    # switches, self-mod cards). CI uses config/android.harness.json doubles.
+
+intelligence:
+  default_model: luna
+  escalation_model: terra-sol
+  transcription:
+    # Dedicated STT — independent of Luna. Production fragment:
+    #   config/production/openclaw.voice.json  (OpenClaw tools.media.audio)
+    # Docs: agent-plan/intelligence/transcription.md, docs/production-voice.md
+    provider: openai
+    primary_model: gpt-4o-transcribe
+    fallback_model: gpt-4o-mini-transcribe
+    whisper_cli_fallback: optional  # config/production/openclaw.voice.whisper-fallback.json
+    openclaw_fragment: ./config/production/openclaw.voice.json
+    env_template: ./config/production/voice.env.example
+  tts:
+    # Speak back only when inbound was audio (OpenClaw messages.tts.auto).
+    auto: inbound
+    provider: openai
+    model: gpt-4o-mini-tts
+    voice: alloy
+
+cron:
+  heartbeat_enabled: false
+
+approvals:
+  # Trust core hooks — see agent-plan/trust-and-safety/approval-matrix.md
+  store_path: ./data/approvals/items.json
+
+# Bookings + shopping production skills (hard approve). Keep enabled:false until
+# Android approvals work. Dry-run default; live requires BOOKINGS_LIVE / SHOPPING_LIVE.
+# Snippet: config/production/openclaw.skills.snippet.json
+# Runbook: docs/bookings-shopping-production.md
+skills:
+  load:
+    extraDirs:
+      - ./src/skills
+    watch: true
+  entries:
+    bookings:
+      enabled: false
+      config:
+        productionConfig: ./config/production/bookings.json
+        harnessConfig: ./config/bookings.harness.json
+        mode: dry_run
+    shopping:
+      enabled: false
+      config:
+        productionConfig: ./config/production/shopping.json
+        harnessConfig: ./config/shopping.harness.json
+        mode: dry_run
+    calendar:
+      # Soft confirm writes. CI uses in-memory stub (config/calendar.harness.json).
+      # Live Google: secrets from calendar.env.example + CALENDAR_LIVE=1.
+      # Docs: docs/calendar-production.md
+      enabled: false
+      config:
+        productionConfig: ./config/production/calendar.json
+        harnessConfig: ./config/calendar.harness.json
+        mode: google
+    voice-calls:
+      enabled: false
+      config:
+        pluginFragment: ./config/production/openclaw.voice-call.json
+        callModePolicy: ./config/production/call-mode.policy.json
+        envTemplate: ./config/production/voice-call.env.example
+        provider: mock
+
+memory:
+  profile_path: ./data/memory/profile.json
+  episodes_path: ./data/memory/episodes.jsonl
+
+data:
+  root: ./data
+  backup_root: ./backups

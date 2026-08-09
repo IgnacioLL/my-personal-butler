@@ -1,0 +1,40 @@
+# Scripts
+
+| Script | Purpose |
+| --- | --- |
+| [`test-ci.sh`](./test-ci.sh) | **`test:ci`** entrypoint — unit + contract/INV-* + integration + gate e2e |
+| [`run_test_ci.py`](./run_test_ci.py) | Layer runner (stdlib); writes `artifacts/test/ci/` + mirrors e2e-01 |
+| [`run_e2e_01.py`](./run_e2e_01.py) | E2E-01 Virtual User voice reminder journey (also invoked by test:ci) |
+| [`run_e2e_02.py`](./run_e2e_02.py) | E2E-02 Habit escalation ladder journey (also invoked by test:ci; T4) |
+| [`run_e2e_03.py`](./run_e2e_03.py) | E2E-03 Todo WhatsApp → Android journey (also invoked by test:ci) |
+| [`run_e2e_04.py`](./run_e2e_04.py) | E2E-04 Calendar soft confirm journey (also invoked by test:ci) |
+| [`run_e2e_05.py`](./run_e2e_05.py) | E2E-05 Diet plan → groceries journey (also invoked by test:ci) |
+| [`run_e2e_06.py`](./run_e2e_06.py) | E2E-06 Booksy propose → approve → book (also invoked by test:ci; T5) |
+| [`run_e2e_07.py`](./run_e2e_07.py) | E2E-07 Shopping with cap / freeze (+ deny; also invoked by test:ci; T6) |
+| [`run_e2e_08.py`](./run_e2e_08.py) | E2E-08 Self-mod patch accept + deny (also invoked by test:ci; T7) |
+| [`run_e2e_09.py`](./run_e2e_09.py) | E2E-09 Ignored hard approval expiry (also invoked by test:ci) |
+| [`run_e2e_10.py`](./run_e2e_10.py) | E2E-10 Restart mid-flight durability (also invoked by test:ci; T8) |
+| [`run_soak_chaos.py`](./run_soak_chaos.py) | Nightly soak/chaos pack (non-blocking; not in merge gate) |
+| [`backup-restore-placeholder.sh`](./backup-restore-placeholder.sh) | Documented backup/restore paths (no cloud in CI) |
+
+```bash
+./scripts/test-ci.sh                 # happy path — expect exit 0
+./scripts/test-ci.sh --break-invariant   # fail-closed proof — expect exit ≠ 0
+make test-ci
+make test-ci-fail-closed             # proves broken INV is rejected
+make e2e-01                          # E2E-01 alone
+make e2e-02                          # E2E-02 alone (habit escalation; T4)
+make e2e-03                          # E2E-03 alone
+make e2e-04                          # E2E-04 alone
+make e2e-05                          # E2E-05 alone
+make e2e-06                          # E2E-06 alone (Booksy; T5)
+make e2e-07                          # E2E-07 alone (shopping cap/freeze; T6)
+make e2e-08                          # E2E-08 alone (self-mod accept+deny; T7)
+make e2e-09                          # E2E-09 alone (hard approval expiry)
+make e2e-10                          # E2E-10 alone (restart durability; T8)
+make soak-chaos                      # nightly soak/chaos (non-blocking)
+```
+
+Gate + INV map: [`docs/ci-gates.md`](../docs/ci-gates.md).
+
+`PYTHONPATH` is set to `src/` so `harness`, `policy`, and `invariants` import cleanly.

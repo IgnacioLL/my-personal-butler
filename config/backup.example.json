@@ -1,0 +1,52 @@
+{
+  "description": "Backup targets for OpenClaw Gateway — see agent-plan/operations/hosting.md",
+  "sources": [
+    {
+      "id": "gateway_config",
+      "path": "config/gateway.local.yaml",
+      "notes": "Channel tokens and model routing — never commit"
+    },
+    {
+      "id": "memory_profile",
+      "path": "data/memory/profile.json",
+      "notes": "Hot personal memory profile"
+    },
+    {
+      "id": "memory_episodes",
+      "path": "data/memory/episodes.jsonl",
+      "notes": "Episodic memory append log"
+    },
+    {
+      "id": "approvals_db",
+      "path": "data/approvals/items.json",
+      "notes": "Pending + decided approval items (restart durability; Android inbox)"
+    },
+    {
+      "id": "todos_db",
+      "path": "data/todos/items.json",
+      "notes": "Canonical todos projected to Android companion"
+    },
+    {
+      "id": "android_config",
+      "path": "config/android.example.yaml",
+      "notes": "Template only — merge into gateway.local.yaml for live pairing"
+    },
+    {
+      "id": "skill_configs",
+      "path": "config/skills/",
+      "notes": "Shop prefs, spend caps, Booksy settings"
+    }
+  ],
+  "destination": {
+    "local": "./backups/",
+    "remote": "s3://your-bucket/personal-agent/ (document only — not wired in harness)"
+  },
+  "restore_checklist": [
+    "Stop Gateway service",
+    "Restore files to matching paths",
+    "Verify pending approvals visible in Android inbox",
+    "Start Gateway and confirm WhatsApp reconnect",
+    "Run make test-ci before relying on bookings/purchases"
+  ],
+  "script": "scripts/backup-restore-placeholder.sh"
+}

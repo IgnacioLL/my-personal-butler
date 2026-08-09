@@ -40,6 +40,10 @@ Do not require a human to read the diff for CI green — but store the diff arti
 - Agent freely rewriting the real `main` branch of the personal butler repo
 - Network install of new global packages as part of a test
 
+Production rails (PROD-09) are validated by **path-matching smoke only** against
+`config/selfmod.allowlist.production.json` + skill presence — never by applying
+patches to the live checkout in `test:ci`.
+
 ## Product doc
 
 [`../../capabilities/self-modification.md`](../../capabilities/self-modification.md)

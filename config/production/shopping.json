@@ -1,0 +1,63 @@
+{
+  "skill": "shopping",
+  "profile": "production",
+  "mode": "dry_run",
+  "live_flag": {
+    "env": "SHOPPING_LIVE",
+    "config_mode_value": "live",
+    "requires_both": true,
+    "notes": "Live card charges require mode=live AND SHOPPING_LIVE=1 after hard Accept. Default remains dry_run. Never set either in CI."
+  },
+  "approval": {
+    "tier": "hard_approve",
+    "mandatory": true,
+    "action_type": "buy",
+    "card_fields": ["merchant", "sku", "name", "price", "currency"]
+  },
+  "spend_caps": {
+    "daily_limit": 50.0,
+    "weekly_limit": 150.0,
+    "currency": "EUR"
+  },
+  "kill_switches": {
+    "freeze_spending": true,
+    "blocks_stale_accepted": true,
+    "notes": "freeze spending blocks execute even with a stale accepted approval (INV-PAY-001)."
+  },
+  "merchants": [
+    {
+      "id": "usual-merchant",
+      "name": "REPLACE_MERCHANT_NAME",
+      "url": "https://merchant.example/REPLACE",
+      "allowlisted": false,
+      "first_purchase_hard_approve": true,
+      "adapter": "browser_checkout"
+    }
+  ],
+  "adapter": {
+    "default": "dry_run",
+    "live_requires": [
+      "mode=live",
+      "SHOPPING_LIVE=1",
+      "hard_approve_accept",
+      "spend_cap_ok",
+      "freeze_spending_off"
+    ],
+    "receipt_required": true
+  },
+  "anti_crazy": {
+    "one_intent_one_proposal": true,
+    "no_upsell": true,
+    "prefer_usual_rebuy": true,
+    "cooling_on_deny": true
+  },
+  "ci": {
+    "adapter": "dry_run",
+    "fixture": "fixtures/shopping/merchant-catalog.json",
+    "harness_config": "config/shopping.harness.json",
+    "live_forbidden": true,
+    "invariants": ["INV-PAY-001", "INV-PAY-002"]
+  },
+  "openclaw_skill": "src/skills/shopping",
+  "notes": "Production shopping merchant adapters behind hard approve + caps + freeze. Dry-run default; live flag documented. Real money never in CI."
+}

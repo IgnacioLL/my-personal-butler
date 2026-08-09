@@ -1,0 +1,58 @@
+{
+  "skill": "bookings",
+  "profile": "production",
+  "mode": "dry_run",
+  "live_flag": {
+    "env": "BOOKINGS_LIVE",
+    "config_mode_value": "live",
+    "requires_both": true,
+    "notes": "Live Booksy-class reservations require mode=live AND BOOKINGS_LIVE=1. Default remains dry_run. Never set either in CI."
+  },
+  "approval": {
+    "tier": "hard_approve",
+    "mandatory": true,
+    "action_type": "book",
+    "card_fields": [
+      "shop",
+      "service",
+      "date_time",
+      "estimated_price",
+      "cancellation_policy"
+    ]
+  },
+  "browser": {
+    "enabled": true,
+    "profile_name": "bookings",
+    "provider_class": "booksy",
+    "separate_from_personal": true,
+    "allowed_hosts": ["booksy.com", "www.booksy.com"],
+    "login_strategy": "manual_session",
+    "max_list_retries": 2,
+    "max_book_retries": 1,
+    "no_aggressive_retry_book": true,
+    "captcha_or_login_required": "stop_and_handoff"
+  },
+  "providers": [
+    {
+      "id": "primary-shop",
+      "name": "REPLACE_SHOP_NAME",
+      "url": "https://booksy.com/REPLACE_SHOP_SLUG",
+      "service": "haircut",
+      "stylist": "",
+      "duration_minutes": 45,
+      "currency": "EUR",
+      "backup": false
+    }
+  ],
+  "calendar_writeback": true,
+  "whatsapp_confirm": true,
+  "ci": {
+    "portal": "stub",
+    "fixture": "fixtures/browser/booksy-stub-slots.json",
+    "harness_config": "config/bookings.harness.json",
+    "live_forbidden": true,
+    "invariants": ["INV-BOOK-001", "INV-BOOK-002"]
+  },
+  "openclaw_skill": "src/skills/bookings",
+  "notes": "Production Booksy-class browser skill. Hard approve mandatory before any reservation submit. Stub portal remains CI-only."
+}

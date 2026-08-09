@@ -1,0 +1,122 @@
+{
+  "description": "Deterministic router fixture intents for TASK-09 (no live Luna in CI)",
+  "cases": [
+    {
+      "id": "luna-reminder",
+      "signals": { "intent": "reminder", "utterance": "Remind me Sunday to call grandma" },
+      "expected_model": "luna"
+    },
+    {
+      "id": "luna-todo",
+      "signals": { "intent": "todo", "utterance": "Add todo: buy oat milk" },
+      "expected_model": "luna"
+    },
+    {
+      "id": "luna-faq",
+      "signals": { "intent": "faq", "utterance": "What is grandma's phone number?" },
+      "expected_model": "luna"
+    },
+    {
+      "id": "luna-calendar-read",
+      "signals": { "intent": "calendar_read", "utterance": "What's on my calendar tomorrow?" },
+      "expected_model": "luna"
+    },
+    {
+      "id": "luna-diet-swap",
+      "signals": { "intent": "diet_swap", "utterance": "Swap rice for quinoa tonight" },
+      "expected_model": "luna"
+    },
+    {
+      "id": "luna-approval-summary",
+      "signals": { "intent": "approval_summary", "utterance": "Summarize pending approvals" },
+      "expected_model": "luna"
+    },
+    {
+      "id": "luna-doc-tweak",
+      "signals": {
+        "intent": "doc_tweak",
+        "utterance": "Tweak skill wording",
+        "self_mod_files": 1
+      },
+      "expected_model": "luna"
+    },
+    {
+      "id": "terra-booking-retry",
+      "signals": {
+        "intent": "booking",
+        "utterance": "Try booking again at the salon",
+        "booking_retry": true
+      },
+      "expected_model": "terra"
+    },
+    {
+      "id": "terra-multi-day-two-constraints",
+      "signals": {
+        "intent": "planning",
+        "utterance": "Plan my week with gym and low carb meals",
+        "multi_day_plan": true,
+        "has_calendar_constraints": true,
+        "has_diet_constraints": true
+      },
+      "expected_model": "terra"
+    },
+    {
+      "id": "terra-planning-multi-constraint-day",
+      "signals": {
+        "intent": "planning",
+        "utterance": "Schedule Tuesday around calendar and diet",
+        "has_calendar_constraints": true,
+        "has_diet_constraints": true
+      },
+      "expected_model": "terra"
+    },
+    {
+      "id": "sol-deep-plan-phrase",
+      "signals": {
+        "intent": "planning",
+        "utterance": "Give me a deep plan for the whole month"
+      },
+      "expected_model": "sol"
+    },
+    {
+      "id": "sol-multi-day-all-constraints",
+      "signals": {
+        "intent": "planning",
+        "utterance": "Plan travel week with meals and meetings",
+        "multi_day_plan": true,
+        "has_calendar_constraints": true,
+        "has_diet_constraints": true,
+        "has_travel_constraints": true
+      },
+      "expected_model": "sol"
+    },
+    {
+      "id": "sol-self-mod-multi-file",
+      "signals": {
+        "intent": "self_mod",
+        "utterance": "Patch router and policy files",
+        "self_mod_files": 3
+      },
+      "expected_model": "sol"
+    },
+    {
+      "id": "sol-policy-change",
+      "signals": {
+        "intent": "self_mod",
+        "utterance": "Change approval policy for shopping",
+        "policy_change": true,
+        "self_mod_files": 1
+      },
+      "expected_model": "sol"
+    },
+    {
+      "id": "sol-booking-messy",
+      "signals": {
+        "intent": "booking",
+        "utterance": "Resolve overlapping salon slots",
+        "booking_messy_conflict": true
+      },
+      "expected_model": "sol"
+    }
+  ]
+}

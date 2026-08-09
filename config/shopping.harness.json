@@ -1,0 +1,17 @@
+{
+  "skill": "shopping",
+  "mode": "dry_run",
+  "approval": {
+    "tier": "hard_approve",
+    "mandatory": true,
+    "action_type": "buy"
+  },
+  "spend_caps": {
+    "daily_limit": 50.0,
+    "weekly_limit": 150.0,
+    "currency": "EUR"
+  },
+  "live_forbidden": true,
+  "merchant_fixture": "fixtures/shopping/merchant-catalog.json",
+  "notes": "Harness/CI dry-run merchant + caps. Cap breach blocks execute (INV-PAY-002). Freeze spending blocks even with stale accepted approval (INV-PAY-001). Production: config/production/shopping.json (SHOPPING_LIVE gated)."
+}

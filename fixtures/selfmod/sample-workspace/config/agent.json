@@ -1,0 +1,8 @@
+{
+  "name": "personal-butler-fixture",
+  "skills": ["reminders"],
+  "quiet_hours": {
+    "enabled": false,
+    "no_calls_after": null
+  }
+}

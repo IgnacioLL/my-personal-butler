@@ -1,0 +1,58 @@
+{
+  "_meta": {
+    "task": "PROD-03",
+    "purpose": "OpenClaw merge fragment: production STT + inbound TTS for WhatsApp voice notes",
+    "merge_into": "~/.openclaw/openclaw.json",
+    "docs": [
+      "docs/production-voice.md",
+      "agent-plan/intelligence/transcription.md"
+    ],
+    "ci_note": "Harness CI keeps fixture STT (SttStub). This fragment is production-only."
+  },
+  "tools": {
+    "media": {
+      "audio": {
+        "enabled": true,
+        "maxBytes": 20971520,
+        "timeoutSeconds": 120,
+        "echoTranscript": false,
+        "scope": {
+          "default": "deny",
+          "rules": [
+            {
+              "action": "allow",
+              "match": {
+                "chatType": "direct"
+              }
+            }
+          ]
+        },
+        "models": [
+          {
+            "provider": "openai",
+            "model": "gpt-4o-transcribe"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-4o-mini-transcribe"
+          }
+        ]
+      }
+    }
+  },
+  "messages": {
+    "tts": {
+      "auto": "inbound",
+      "mode": "final",
+      "provider": "openai",
+      "maxTextLength": 4000,
+      "timeoutMs": 30000,
+      "providers": {
+        "openai": {
+          "model": "gpt-4o-mini-tts",
+          "voice": "alloy"
+        }
+      }
+    }
+  }
+}

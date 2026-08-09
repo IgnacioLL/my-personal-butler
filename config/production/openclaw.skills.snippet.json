@@ -1,0 +1,77 @@
+{
+  "_comment": "Merge under skills in ~/.openclaw/openclaw.json (or gateway.local). Copy-ready; no secrets.",
+  "skills": {
+    "load": {
+      "extraDirs": ["./src/skills"],
+      "watch": true
+    },
+    "entries": {
+      "personal-memory": {
+        "enabled": true
+      },
+      "reminders-habits": {
+        "enabled": true
+      },
+      "personal-todos": {
+        "enabled": true
+      },
+      "heartbeat-ops": {
+        "enabled": true
+      },
+      "bookings": {
+        "enabled": false,
+        "config": {
+          "productionConfig": "./config/production/bookings.json",
+          "harnessConfig": "./config/bookings.harness.json",
+          "mode": "dry_run",
+          "approvalTier": "hard_approve",
+          "ciStubPortalOnly": true
+        },
+        "env": {
+          "BOOKINGS_LIVE": "0"
+        }
+      },
+      "shopping": {
+        "enabled": false,
+        "config": {
+          "productionConfig": "./config/production/shopping.json",
+          "harnessConfig": "./config/shopping.harness.json",
+          "mode": "dry_run",
+          "approvalTier": "hard_approve",
+          "spendCapsFrom": "./config/production/shopping.json",
+          "freezeSpendingHonored": true
+        },
+        "env": {
+          "SHOPPING_LIVE": "0"
+        }
+      },
+      "calendar": {
+        "enabled": false,
+        "config": {
+          "productionConfig": "./config/production/calendar.json",
+          "harnessConfig": "./config/calendar.harness.json",
+          "mode": "google",
+          "approvalTier": "soft_confirm",
+          "ciMemoryAdapterOnly": true
+        },
+        "env": {
+          "CALENDAR_LIVE": "0",
+          "CALENDAR_MODE": "google"
+        }
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "skills": [
+        "personal-memory",
+        "reminders-habits",
+        "personal-todos",
+        "heartbeat-ops"
+      ]
+    }
+  },
+  "cron": {
+    "heartbeat_enabled": true
+  }
+}

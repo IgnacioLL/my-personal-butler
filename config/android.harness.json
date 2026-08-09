@@ -1,0 +1,31 @@
+{
+  "description": "Harness/CI Android companion doubles — not a live device (PROD-05).",
+  "mode": "harness",
+  "channel": "android",
+  "doubles": {
+    "todos": "channels.android.projection.AndroidProjectionApi",
+    "approvals": "channels.android.approvals.AndroidApprovalInboxApi",
+    "status": "channels.android.status.AndroidStatusApi",
+    "notifications": "channels.android.notifications.AndroidNotificationCatcher"
+  },
+  "features": {
+    "todos": true,
+    "approvals_accept_deny_edit": true,
+    "status_kill_switches": true,
+    "self_mod_cards": true
+  },
+  "ci_gates": [
+    "E2E-03",
+    "TASK-11",
+    "INV-APPR-001",
+    "INV-APPR-002",
+    "INV-APPR-003",
+    "INV-APPR-004",
+    "INV-KILL-001",
+    "INV-KILL-002",
+    "INV-SELF-002"
+  ],
+  "production_config": "config/android.example.yaml",
+  "pairing_runbook": "docs/android-pairing.md",
+  "notes": "make test-ci must keep using these API doubles. Live OpenClaw Android pairing is operator-only (docs/android-pairing.md)."
+}

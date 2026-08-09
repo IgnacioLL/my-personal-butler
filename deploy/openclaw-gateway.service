@@ -1,0 +1,50 @@
+# OpenClaw Gateway — systemd unit template for non-Docker VPS hosts.
+#
+# Prefer the official installer when possible:
+#   curl -fsSL https://openclaw.ai/install.sh | bash
+#   openclaw onboard --install-daemon
+#
+# Or generate a matching unit:
+#   openclaw gateway install
+#
+# For always-on multi-user VPS, install as a system unit:
+#   sudo cp openclaw-gateway.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now openclaw-gateway.service
+#
+# Docs: https://documentation.openclaw.ai/gateway
+
+[Unit]
+Description=OpenClaw Gateway (personal agent)
+Documentation=https://documentation.openclaw.ai/gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+WorkingDirectory=/home/openclaw
+
+# Official install path (adjust if using install-cli.sh prefix):
+Environment=HOME=/home/openclaw
+Environment=OPENCLAW_STATE_DIR=/home/openclaw/.openclaw
+Environment=OPENCLAW_CONFIG_PATH=/home/openclaw/.openclaw/openclaw.json
+Environment=OPENCLAW_WORKSPACE_DIR=/home/openclaw/.openclaw/workspace
+# Set via EnvironmentFile= (never commit secrets):
+EnvironmentFile=-/etc/openclaw/gateway.env
+
+ExecStart=/usr/local/bin/openclaw gateway run --bind lan --port 18789
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Hardening (adjust if sandboxing needs more caps)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/openclaw/.openclaw /home/openclaw/.openclaw/workspace /home/openclaw/.config
+
+[Install]
+WantedBy=multi-user.target

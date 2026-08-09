@@ -24,10 +24,12 @@ Surfaces where you interact with the agent. All channels talk to the **same** Op
 - [WhatsApp](./whatsapp.md) — main conversational interface
 - [Voice calls](./voice-calls.md) — agent calls you / limited inbound
 - [Android companion](./android-companion.md) — todos + approvals UI
+- Production pairing runbook: [`../../docs/android-pairing.md`](../../docs/android-pairing.md)
+- Production config: [`../../config/android.example.yaml`](../../config/android.example.yaml)
 
 ## Build order
 
 1. WhatsApp DM + transcription
-2. Android pairing for approvals/todos
+2. Android pairing for approvals/todos ([pairing runbook](../../docs/android-pairing.md))
 3. Outbound calls for important reminders
 4. Optional inbound call allowlist later

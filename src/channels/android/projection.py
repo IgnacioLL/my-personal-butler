@@ -1,0 +1,97 @@
+"""Android projection API double — todos + approvals + Status for paired node.
+
+Gateway owns canonical state; this API reflects the same ids/titles/statuses
+that WhatsApp-created todos produce. Used by integration tests and E2E-03 prep.
+Production pairing: docs/android-pairing.md + config/android.example.yaml.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Optional
+
+from capabilities.todos.store import Todo, TodoSource, TodoStore
+from channels.android.approvals import AndroidApprovalInboxApi
+from channels.android.status import AndroidStatusApi
+from harness.clock import FakeClock
+from policy.action_gateway import ActionGateway
+
+
+@dataclass(frozen=True)
+class TodoProjection:
+    """Android-facing todo shape (v1: id, title, status)."""
+
+    id: str
+    title: str
+    status: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"id": self.id, "title": self.title, "status": self.status}
+
+
+def _project(todo: Todo) -> TodoProjection:
+    return TodoProjection(id=todo.id, title=todo.title, status=todo.status.value)
+
+
+class AndroidProjectionApi:
+    """API-level Android node simulation for todo sync + approval inbox + Status."""
+
+    def __init__(
+        self,
+        store: TodoStore,
+        clock: FakeClock,
+        *,
+        gateway: ActionGateway | None = None,
+    ) -> None:
+        self.store = store
+        self.clock = clock
+        self.gateway = gateway
+        self.approvals: AndroidApprovalInboxApi | None = None
+        self.status: AndroidStatusApi | None = None
+        if self.gateway is not None:
+            self.gateway.todos = self.store
+            self.approvals = AndroidApprovalInboxApi(self.gateway)
+            self.status = AndroidStatusApi(self.gateway)
+
+    def list_todos(self, *, status: str | None = None) -> list[TodoProjection]:
+        todos = self.store.list_all()
+        if status is not None:
+            todos = [t for t in todos if t.status.value == status]
+        return [_project(t) for t in todos]
+
+    def get_todo(self, todo_id: str) -> Optional[TodoProjection]:
+        todo = self.store.get(todo_id)
+        return _project(todo) if todo else None
+
+    def complete_todo(self, todo_id: str) -> TodoProjection:
+        """Mark todo done — reflects in canonical agent store."""
+        if self.gateway is not None:
+            result = self.gateway.propose(
+                "todo_complete",
+                f"Complete todo {todo_id}",
+                {"todo_id": todo_id, "completed_from": TodoSource.ANDROID.value},
+            )
+            if not result.ok or not result.executed:
+                raise ValueError(result.reason)
+            todo = self.store.get(todo_id)
+            if todo is None:
+                raise ValueError("todo_not_found_after_complete")
+            return _project(todo)
+
+        todo = self.store.complete(
+            todo_id,
+            completed_at=self.clock.now(),
+            completed_from=TodoSource.ANDROID,
+        )
+        return _project(todo)
+
+    def snapshot(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "todos": [p.to_dict() for p in self.list_todos()],
+            "open_count": len(self.store.list_open()),
+        }
+        if self.approvals is not None:
+            data["approvals"] = self.approvals.snapshot()
+        if self.status is not None:
+            data["status"] = self.status.snapshot()
+        return data

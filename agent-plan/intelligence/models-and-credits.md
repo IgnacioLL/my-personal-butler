@@ -14,7 +14,7 @@ Run the agent mainly on **GPT-5.6 Luna** through your **Codex / ChatGPT subscrip
 | STT | Dedicated transcription model | WhatsApp / call audio → text |
 | TTS | Cheap/natural TTS | optional spoken WhatsApp replies |
 
-Exact STT choice lives in [transcription.md](./transcription.md).
+Exact STT/TTS choice lives in [transcription.md](./transcription.md). Production OpenClaw fragments: `config/production/openclaw.voice.json` + `voice.env.example` (operator runbook: `docs/production-voice.md`).
 
 ## Routing policy
 

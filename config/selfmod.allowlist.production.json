@@ -1,0 +1,49 @@
+{
+  "description": "Production path allowlist for this personal-butler repo (PROD-09). Skills, docs, versioned config, plan docs, policy — not secrets.",
+  "workspace_root": ".",
+  "allowed_globs": [
+    "src/skills/**",
+    "docs/**",
+    "config/**",
+    "agent-plan/**",
+    "scripts/**",
+    "tests/**",
+    "src/policy/**",
+    "README.md",
+    "Makefile",
+    "status.md"
+  ],
+  "policy_path_globs": [
+    "src/policy/**",
+    "**/approvals*.py",
+    "**/kill_switches*.py",
+    "**/safety*.py",
+    "**/approval-matrix*",
+    "agent-plan/trust-and-safety/**",
+    "config/selfmod.allowlist.production.json",
+    "config/selfmod.production.json"
+  ],
+  "forbidden_globs": [
+    ".env",
+    ".env.*",
+    "**/.env",
+    "**/.env.*",
+    "**/secrets/**",
+    "**/credentials/**",
+    "**/*secret*",
+    "**/*credential*",
+    "config/*.local.*",
+    "config/**/*.local.*",
+    "**/harness.local.env",
+    "data/**",
+    "**/*.pem",
+    "**/*.key",
+    "**/id_rsa*",
+    "**/.openclaw/**",
+    "**/.git/**",
+    "**/node_modules/**"
+  ],
+  "branch_prefix": "cursor/agent-self-",
+  "diff_ceiling_lines": 400,
+  "notes": "Writes outside allowed_globs fail closed. Forbidden globs win over allowed. Policy-path matches require policy-change subtype + hard approve. Fixture workspace stays for CI (fixtures/selfmod/)."
+}

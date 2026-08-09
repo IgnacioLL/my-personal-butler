@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "task": "PROD-03",
+    "purpose": "Optional Whisper CLI fallback entry for tools.media.audio.models (append after OpenAI models)",
+    "requires": "whisper binary on Gateway PATH (operator install — agents must not pip/apt install)",
+    "docs": "docs/production-voice.md#whisper-cli-fallback"
+  },
+  "tools": {
+    "media": {
+      "audio": {
+        "models": [
+          {
+            "type": "cli",
+            "command": "whisper",
+            "args": ["--model", "base", "{{MediaPath}}"],
+            "timeoutSeconds": 45
+          }
+        ]
+      }
+    }
+  }
+}

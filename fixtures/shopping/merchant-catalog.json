@@ -1,0 +1,43 @@
+{
+  "merchant": "StubMart",
+  "merchant_url": "https://stub.merchant.test/stubmart",
+  "currency": "EUR",
+  "products": [
+    {
+      "sku": "prot-whey-2kg",
+      "name": "StubFit Whey Protein Powder 2kg",
+      "brand": "StubFit",
+      "size": "2kg",
+      "price": 29.99,
+      "currency": "EUR",
+      "merchant": "StubMart",
+      "item_key": "protein_powder",
+      "usual": true,
+      "aliases": ["protein powder", "protein", "whey", "usual protein"]
+    },
+    {
+      "sku": "prot-whey-1kg",
+      "name": "StubFit Whey Protein Powder 1kg",
+      "brand": "StubFit",
+      "size": "1kg",
+      "price": 16.5,
+      "currency": "EUR",
+      "merchant": "StubMart",
+      "item_key": "protein_powder",
+      "usual": false,
+      "aliases": ["protein powder", "whey"]
+    },
+    {
+      "sku": "luxury-espresso",
+      "name": "Luxury Espresso Machine",
+      "brand": "OverCap",
+      "size": "1 unit",
+      "price": 999.0,
+      "currency": "EUR",
+      "merchant": "StubMart",
+      "item_key": "espresso_machine",
+      "usual": false,
+      "aliases": ["espresso", "coffee machine"]
+    }
+  ]
+}

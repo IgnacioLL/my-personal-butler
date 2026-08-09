@@ -1,0 +1,27 @@
+{
+  "description": "Path allowlist for self-mod fixture workspace (INV-SELF-001)",
+  "workspace_root": "sample-workspace",
+  "allowed_globs": [
+    "skills/**",
+    "config/**",
+    "agent-plan/**",
+    "tests/**",
+    "src/policy/**"
+  ],
+  "policy_path_globs": [
+    "src/policy/**",
+    "**/approvals*.py",
+    "**/kill_switches*.py",
+    "**/safety*.py",
+    "**/approval-matrix*"
+  ],
+  "forbidden_globs": [
+    ".env",
+    ".env.*",
+    "**/secrets/**",
+    "**/credentials/**"
+  ],
+  "branch_prefix": "cursor/agent-self-",
+  "diff_ceiling_lines": 400,
+  "notes": "Writes outside allowed_globs fail closed. Policy-path matches require policy-change subtype."
+}

@@ -1,0 +1,72 @@
+# OpenClaw Android companion — production control plane (no secrets).
+# Merge into gateway.local.yaml / ~/.openclaw config. Copy — do not commit filled secrets.
+#
+# Pairing runbook: docs/android-pairing.md
+# Product shape: agent-plan/channels/android-companion.md
+# CI doubles: config/android.harness.json + src/channels/android/
+
+channels:
+  android:
+    enabled: true
+    # Official OpenClaw Android node (role: node). Phone does not host Gateway.
+    role: node
+    # Prefer high-priority push for hard + self-mod approvals.
+    push:
+      hard_approve: high
+      self_mod: high
+      reminder: normal
+      booking_confirmed: normal
+      agent_paused_or_error: high
+
+    features:
+      todos:
+        enabled: true
+        # Gateway owns canonical todos; Android lists / completes.
+        sync: gateway_canonical
+        complete_reflects_store: true
+      approvals:
+        enabled: true
+        # Inbox actions — same surface as harness AndroidApprovalInboxApi.
+        actions:
+          - accept   # accept once + execute
+          - deny     # never execute
+          - edit     # patch summary/payload while pending
+        prefer_hard_on_android: true
+        default_hard_ttl_hours: 2
+        whatsapp_backup_soft_confirm: true
+      status:
+        enabled: true
+        show_gateway_online: true
+        kill_switches:
+          pause_agent: true
+          freeze_spending: true
+          freeze_self_mod: true
+          cancel_pending: true
+      self_mod_cards:
+        enabled: true
+        require_diff_summary: true
+        require_files_touched: true
+        require_rollback_ref: true
+        badge_code_change: "Code change"
+        badge_policy_change: "policy-change"
+        visually_distinct: true
+
+    pairing:
+      # Manual approve by default (openclaw devices approve / nodes approve).
+      auto_approve_cidrs: []
+      require_wss_for_tailnet: true
+      # After first pair, app auto-reconnects while foreground service is up.
+      reconnect: auto
+
+# Durable stores the Android node reads/writes through the Gateway.
+approvals:
+  store_path: ./data/approvals/items.json
+
+todos:
+  store_path: ./data/todos/items.json
+
+# Kill-switch panel projected on Android Status (Gateway is source of truth).
+kill_switches:
+  pause_agent: false
+  freeze_spending: false
+  freeze_self_mod: false

@@ -1,0 +1,14 @@
+{
+  "skill": "self_modification",
+  "mode": "fixture_workspace",
+  "allowlist": "fixtures/selfmod/allowlist.json",
+  "workspace": "fixtures/selfmod/sample-workspace",
+  "branch_prefix": "cursor/agent-self-",
+  "diff_ceiling_lines": 400,
+  "production": {
+    "config": "config/selfmod.production.json",
+    "allowlist": "config/selfmod.allowlist.production.json",
+    "skill": "src/skills/self-modification/SKILL.md"
+  },
+  "notes": "Harness/CI self-mod (INV-SELF). Fixture workspace only — never the live checkout. Production path: config/selfmod.production.json (PROD-09). Apply only after hard Accept. freeze_self_mod blocks write/apply (INV-SELF-002). Secrets rejected at propose (INV-SELF-004)."
+}

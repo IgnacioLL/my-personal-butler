@@ -1,0 +1,32 @@
+# Test artifacts (convention: artifacts/test/<task-or-flow>/)
+artifacts/test/**/*
+!artifacts/test/README.md
+!artifacts/test/.gitkeep
+
+# Local config with secrets (use *.example templates)
+config/gateway.local.*
+config/harness.local.*
+config/openclaw/openclaw.local.*
+config/production/*.local.env
+config/production/voice.local.env
+config/production/voice-call.local.env
+config/production/calendar.local.env
+config/calendar.local.*
+data/secrets/
+.env
+.env.*
+!deploy/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

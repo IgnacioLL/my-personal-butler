@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "identity": {
+    "name": "Alex",
+    "language": "en",
+    "household": "lives nearby; calls grandma on Sundays",
+    "timezone": "Europe/Madrid",
+    "people": [
+      {
+        "name": "grandma",
+        "ritual": "Sunday afternoon call"
+      }
+    ]
+  },
+  "preferences": {
+    "food_likes": ["mediterranean", "oat milk"],
+    "food_dislikes": ["shellfish", "cilantro"],
+    "allergies": ["peanuts"],
+    "quiet_hours": {
+      "start": "22:00",
+      "end": "07:30"
+    },
+    "brands": ["stub-oat-brand", "StubFit"],
+    "haircut_style": "short sides, longer top",
+    "booking_windows": ["Saturday morning"],
+    "usual_purchases": {
+      "protein_powder": {
+        "sku": "prot-whey-2kg",
+        "brand": "StubFit",
+        "size": "2kg",
+        "merchant": "StubMart",
+        "name": "StubFit Whey Protein Powder 2kg"
+      }
+    }
+  },
+  "goals": {
+    "diet_phase": "low carb",
+    "trip_wishlist": ["Porto", "Lisbon"],
+    "habit_targets": ["call grandma weekly", "morning stretch"]
+  },
+  "procedures": {
+    "spend_approval": "confirm purchases over 20 EUR in WhatsApp",
+    "booksy_flow": "prefer Saturday slots at Main St barber; soft-confirm calendar"
+  }
+}
