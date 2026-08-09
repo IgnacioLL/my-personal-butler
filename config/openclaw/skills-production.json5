@@ -12,6 +12,26 @@
       "reminders-habits": { enabled: true },
       "personal-todos": { enabled: true },
       "heartbeat-ops": { enabled: true },
+      // PROD-08 — keep disabled until Android hard-approve UX is proven.
+      // Live still requires mode=live + BOOKINGS_LIVE / SHOPPING_LIVE.
+      bookings: {
+        enabled: false,
+        config: {
+          productionConfig: "./config/production/bookings.json",
+          harnessConfig: "./config/bookings.harness.json",
+          mode: "dry_run",
+        },
+        env: { BOOKINGS_LIVE: "0" },
+      },
+      shopping: {
+        enabled: false,
+        config: {
+          productionConfig: "./config/production/shopping.json",
+          harnessConfig: "./config/shopping.harness.json",
+          mode: "dry_run",
+        },
+        env: { SHOPPING_LIVE: "0" },
+      },
     },
   },
   agents: {

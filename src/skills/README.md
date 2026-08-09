@@ -14,7 +14,15 @@ Harness CI exercises the same behavior via `src/capabilities/*`, `src/intelligen
 | Heartbeat | [`heartbeat-ops/`](./heartbeat-ops/) | `heartbeat_morning_brief`, `heartbeat_weekly_review` |
 | Calendar | [`calendar/`](./calendar/) | `calendar_read`, `calendar_create`, `calendar_modify`, `calendar_cancel` (PROD-06; soft confirm) |
 
+Hard-approve commerce skills (PROD-08; disabled until approvals proven):
+
+| Skill | Directory | Safety |
+| --- | --- | --- |
+| Bookings | [`bookings/`](./bookings/) | Hard approve; dry-run default; `BOOKINGS_LIVE` |
+| Shopping | [`shopping/`](./shopping/) | Hard approve + caps + freeze; dry-run default; `SHOPPING_LIVE` |
+
 Tool JSON schemas: [`../tools/schemas.json`](../tools/schemas.json). Registry: [`../tools/registry.py`](../tools/registry.py).
+Runbook: [`../../docs/bookings-shopping-production.md`](../../docs/bookings-shopping-production.md).
 
 ## Enable in OpenClaw
 
