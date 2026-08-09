@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 import traceback
@@ -104,6 +105,11 @@ from capabilities.selfmod.parse import (  # noqa: E402
     EXPECTED_E2E08_UTTERANCE,
     looks_like_self_mod,
     parse_self_mod,
+)
+from capabilities.selfmod.production import (  # noqa: E402
+    load_production_config,
+    production_paths_smoke,
+    production_skill_present,
 )
 from capabilities.selfmod.secrets import scan_diff_for_secrets  # noqa: E402
 from capabilities.selfmod.service import SelfModService  # noqa: E402
@@ -684,6 +690,7 @@ def run_integration(out_dir: Path) -> dict[str, Any]:
 
     checks.extend(_run_memory_integration_checks(ROOT))
     checks.extend(_run_task05_hosting_checks(ROOT))
+    checks.extend(_run_prod01_deploy_checks(ROOT))
     checks.extend(_run_transcription_integration_checks(ROOT))
     checks.extend(_run_models_integration_checks(ROOT))
     checks.extend(_run_reminder_integration_checks(ROOT))
@@ -2974,6 +2981,92 @@ def _run_selfmod_unit_checks(root: Path) -> list[dict[str, Any]]:
         }
     )
 
+    # PROD-09: production allowlist + skill (path matching only; no live apply).
+    checks.extend(_run_prod_09_unit_checks(root))
+
+    return checks
+
+
+def _run_prod_09_unit_checks(root: Path) -> list[dict[str, Any]]:
+    """Production self-mod allowlist/skill smoke (fixtures remain INV-SELF source)."""
+    checks: list[dict[str, Any]] = []
+    try:
+        prod = load_production_config()
+        smoke = production_paths_smoke(prod.allowlist)
+        skill_ok = production_skill_present() and prod.skill_path.is_file()
+        hard = dict(prod.raw.get("approval") or {})
+        hard_ok = (
+            hard.get("tier") == "hard_approve"
+            and hard.get("apply_requires_accept") is True
+            and hard.get("auto_forbidden") is True
+        )
+        rollback = dict(prod.raw.get("rollback") or {})
+        rollback_ok = (
+            rollback.get("record_rollback_ref") is True
+            and rollback.get("prefer_branch_first") is True
+            and rollback.get("protect_main") is True
+        )
+        freeze_note = dict(prod.raw.get("kill_switches") or {})
+        freeze_ok = "freeze_self_mod" in freeze_note
+        subtype = dict(prod.raw.get("subtypes") or {}).get("policy-change") or {}
+        subtype_ok = subtype.get("action_type") == "policy_change"
+        harness_untouched = (
+            (root / "fixtures" / "selfmod" / "allowlist.json").is_file()
+            and (root / "config" / "selfmod.harness.json").is_file()
+        )
+        ok = (
+            smoke.get("ok")
+            and skill_ok
+            and hard_ok
+            and rollback_ok
+            and freeze_ok
+            and subtype_ok
+            and harness_untouched
+            and prod.mode == "production_repo"
+            and prod.branch_prefix.startswith("cursor/agent-self-")
+        )
+        checks.append(
+            {
+                "id": "unit.selfmod.prod09_allowlist_skill",
+                "result": "PASS" if ok else "FAIL",
+                "detail": (
+                    f"smoke={smoke.get('ok')} skill={skill_ok} hard={hard_ok} "
+                    f"rollback={rollback_ok} freeze={freeze_ok} "
+                    f"subtype={subtype_ok} mode={prod.mode}"
+                ),
+            }
+        )
+        # Policy-change on production policy path; normal skill path not policy.
+        policy_path = "src/policy/approvals.py"
+        skill_path = "src/skills/self-modification/SKILL.md"
+        pol = is_policy_path(policy_path, prod.allowlist)
+        skill_pol = is_policy_path(skill_path, prod.allowlist)
+        checks.append(
+            {
+                "id": "unit.selfmod.prod09_policy_change_subtype",
+                "result": "PASS" if (pol and not skill_pol) else "FAIL",
+                "detail": f"policy={pol} skill_is_policy={skill_pol}",
+            }
+        )
+        # Secrets / local config remain forbidden under production rails.
+        secrets_blocked = not path_allowed(".env", prod.allowlist) and not path_allowed(
+            "config/gateway.local.yaml", prod.allowlist
+        )
+        checks.append(
+            {
+                "id": "unit.selfmod.prod09_secrets_forbidden",
+                "result": "PASS" if secrets_blocked else "FAIL",
+                "detail": "production allowlist forbids .env and *.local.* config",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 — surface load errors as FAIL checks
+        checks.append(
+            {
+                "id": "unit.selfmod.prod09_allowlist_skill",
+                "result": "FAIL",
+                "detail": f"load_error:{exc}",
+            }
+        )
     return checks
 
 
@@ -4155,6 +4248,86 @@ def _run_task05_hosting_checks(root: Path) -> list[dict[str, Any]]:
                 "id": "integration.hosting.gateway_harness_restart",
                 "result": "PASS" if harness_ok else "FAIL",
                 "detail": f"reopened_via_harness={harness_ok}",
+            }
+        )
+
+    return checks
+
+
+def _run_prod01_deploy_checks(root: Path) -> list[dict[str, Any]]:
+    """PROD-01: deploy compose + runbook present and structurally valid (no Docker required)."""
+    checks: list[dict[str, Any]] = []
+    deploy_dir = root / "deploy"
+    required_files = {
+        "deploy/docker-compose.yml": deploy_dir / "docker-compose.yml",
+        "deploy/.env.example": deploy_dir / ".env.example",
+        "deploy/setup-docker.sh": deploy_dir / "setup-docker.sh",
+        "deploy/backup-openclaw.sh": deploy_dir / "backup-openclaw.sh",
+        "deploy/openclaw-gateway.service": deploy_dir / "openclaw-gateway.service",
+        "deploy/install-systemd.sh": deploy_dir / "install-systemd.sh",
+        "docs/deploy.md": root / "docs" / "deploy.md",
+    }
+    missing = [label for label, path in required_files.items() if not path.is_file()]
+    checks.append(
+        {
+            "id": "integration.deploy.prod01_files",
+            "result": "PASS" if not missing else "FAIL",
+            "detail": f"missing={missing or 'none'}",
+        }
+    )
+
+    compose_path = deploy_dir / "docker-compose.yml"
+    compose_text = compose_path.read_text(encoding="utf-8") if compose_path.is_file() else ""
+    compose_markers = [
+        "openclaw-gateway:",
+        "openclaw-cli:",
+        "restart: unless-stopped",
+        "/home/node/.openclaw",
+        "OPENCLAW_STATE_DIR",
+        "18789",
+        "ghcr.io/openclaw/openclaw",
+    ]
+    compose_ok = compose_path.is_file() and all(m in compose_text for m in compose_markers)
+    checks.append(
+        {
+            "id": "integration.deploy.prod01_compose_structure",
+            "result": "PASS" if compose_ok else "FAIL",
+            "detail": (
+                f"markers_ok={compose_ok} "
+                f"services={'openclaw-gateway' in compose_text and 'openclaw-cli' in compose_text}"
+            ),
+        }
+    )
+
+    deploy_doc = root / "docs" / "deploy.md"
+    doc_text = deploy_doc.read_text(encoding="utf-8") if deploy_doc.is_file() else ""
+    doc_markers = [
+        "Oracle Cloud",
+        "Hetzner",
+        "backup",
+        "reboot",
+        "Twilio",
+        "systemd",
+        "openclaw.ai/install.sh",
+        "ghcr.io/openclaw/openclaw",
+    ]
+    doc_ok = deploy_doc.is_file() and all(m.lower() in doc_text.lower() for m in doc_markers)
+    checks.append(
+        {
+            "id": "integration.deploy.prod01_runbook",
+            "result": "PASS" if doc_ok else "FAIL",
+            "detail": f"sections_ok={doc_ok}",
+        }
+    )
+
+    for script_name in ("setup-docker.sh", "backup-openclaw.sh", "install-systemd.sh"):
+        script = deploy_dir / script_name
+        executable = script.is_file() and os.access(script, os.X_OK)
+        checks.append(
+            {
+                "id": f"integration.deploy.prod01_{script_name.replace('.', '_')}_executable",
+                "result": "PASS" if executable else "FAIL",
+                "detail": f"path={script} executable={executable}",
             }
         )
 
@@ -6735,6 +6908,119 @@ def aggregate(layers: list[dict[str, Any]], out_dir: Path, *, broken: bool) -> i
                         "artifacts/test/task-23/workspace-status.json",
                         "artifacts/test/task-23/outbound-messages.json",
                         "artifacts/test/task-23/diffs/quiet-hours.patch",
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    # PROD-09 — production self-mod allowlist + skill (path smoke only; fixtures for INV-SELF).
+    # Fail-closed must not stomp happy-path prod-09 verification.
+    prod09_unit = [
+        c
+        for L in layers
+        if L["layer"] == "unit"
+        for c in L.get("checks", [])
+        if str(c.get("id", "")).startswith("unit.selfmod.prod09_")
+    ]
+    prod09_pass = (
+        bool(prod09_unit)
+        and all(c.get("result") == "PASS" for c in prod09_unit)
+        and bool(self_invs)
+        and all(c.get("result") == "PASS" for c in self_invs)
+    )
+    if not broken:
+        prod09 = ROOT / "artifacts" / "test" / "prod-09"
+        prod09.mkdir(parents=True, exist_ok=True)
+        try:
+            prod_cfg = load_production_config()
+            smoke = production_paths_smoke(prod_cfg.allowlist)
+            prod_payload = {
+                "config": prod_cfg.to_dict(),
+                "smoke": smoke,
+                "skill_present": production_skill_present(),
+                "fixture_allowlist": "fixtures/selfmod/allowlist.json",
+                "harness_config": "config/selfmod.harness.json",
+            }
+        except Exception as exc:  # noqa: BLE001
+            prod_cfg = None
+            smoke = {"ok": False, "error": str(exc)}
+            prod_payload = {"error": str(exc), "smoke": smoke}
+            prod09_pass = False
+
+        (prod09 / "production-config.json").write_text(
+            json.dumps(prod_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (prod09 / "allowlist.json").write_text(
+            json.dumps(
+                (prod_cfg.allowlist.to_dict() if prod_cfg else {}),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_report(
+            prod09,
+            layer="prod-09",
+            result="PASS" if prod09_pass else "FAIL",
+            checks=prod09_unit + self_invs,
+            extra={
+                "broken_allow_all": broken,
+                "ci_overall": overall,
+                "production_mode": getattr(prod_cfg, "mode", None),
+                "skill_path": "src/skills/self-modification/SKILL.md",
+                "allowlist_path": "config/selfmod.allowlist.production.json",
+                "smoke_ok": bool(smoke.get("ok")),
+                "inv_self_green": all(c.get("result") == "PASS" for c in self_invs),
+                "agent_b_rerun": {
+                    "happy_path": ["./scripts/test-ci.sh", "make test-ci"],
+                    "fail_closed_proof": [
+                        "./scripts/test-ci.sh --break-invariant",
+                        "make test-ci-fail-closed",
+                    ],
+                    "artifacts": "artifacts/test/prod-09/",
+                },
+            },
+        )
+        (prod09 / "verification.json").write_text(
+            json.dumps(
+                {
+                    "claim": (
+                        "PROD-09 production self-mod: real-repo allowlist for "
+                        "skills/docs/config/plan/policy (not secrets); OpenClaw skill "
+                        "present; hard approve + freeze_self_mod + policy-change subtype "
+                        "+ rollback refs documented in config; CI fixtures untouched; "
+                        "INV-SELF-001..004 remain green"
+                    ),
+                    "result": "PASS" if prod09_pass else "FAIL",
+                    "ci_overall": overall,
+                    "unit_checks": [c.get("id") for c in prod09_unit],
+                    "invariants": [
+                        "INV-SELF-001",
+                        "INV-SELF-002",
+                        "INV-SELF-003",
+                        "INV-SELF-004",
+                    ],
+                    "smoke_ok": bool(smoke.get("ok")),
+                    "skill_path": "src/skills/self-modification/SKILL.md",
+                    "allowlist_path": "config/selfmod.allowlist.production.json",
+                    "production_config": "config/selfmod.production.json",
+                    "commands": [
+                        "./scripts/test-ci.sh",
+                        "make test-ci",
+                        "make test-ci-fail-closed",
+                        "make e2e-08",
+                    ],
+                    "artifacts": [
+                        "artifacts/test/prod-09/report.json",
+                        "artifacts/test/prod-09/verification.json",
+                        "artifacts/test/prod-09/production-config.json",
+                        "artifacts/test/prod-09/allowlist.json",
                     ],
                 },
                 indent=2,
