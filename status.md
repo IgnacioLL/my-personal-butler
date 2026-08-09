@@ -438,6 +438,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 | 2026-08-09 00:25 | PROD-06 | Agent A | cursor-grok-4.5-high | implement | Google Calendar OAuth adapter + soft confirm; status → review |
 | 2026-08-09 00:06 | PROD-02 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; Luna/allowFrom/groups/Codex spot-checks; status → done |
 | 2026-08-09 00:08 | PROD-09 | Agent B | cursor-grok-4.5-high | review | PASS — test-ci/fail-closed exit 0; real-repo allowlist/hard-approve/freeze/INV-SELF spot-checks; status → done |
+| 2026-08-09 00:25 | PROD-05 | Agent A | cursor-grok-4.5-high | implement | Android pairing + control plane config; status → review |
 
 ---
 
@@ -519,7 +520,7 @@ Planner-owned tracker. Source of truth for delegated work against `agent-plan/` 
 - **Scope:** Production pairing docs + config for OpenClaw Android node: todos sync, approval inbox (Accept/Deny/Edit), kill switches on Status screen, self-mod approval cards. Full always-on control plane — not API doubles alone.
 - **Acceptance:** Operator checklist to pair phone; config templates; CI doubles remain for gate tests.
 - **Result:** Agent A — Production pairing runbook + operator checklist (`docs/android-pairing.md`); `config/android.example.yaml` (todos, Accept/Deny/Edit inbox, Status kill switches, self-mod cards); `config/android.harness.json` keeps CI doubles; `AndroidStatusApi` + self-mod card badges on inbox projection; plan leaf aligned. Unit checks `unit.android_status.*`, `unit.android.prod05_*`, `unit.android_approval.self_mod_card_fields`. Ready for Agent B.
-- **Artifacts:** `docs/android-pairing.md`, `config/android.example.yaml`, `config/android.harness.json`, `config/gateway.example.yaml`, `config/backup.example.json`, `config/README.md`, `agent-plan/channels/{android-companion,index}.md`, `agent-plan/operations/hosting.md`, `src/channels/android/{status,approvals,projection,__init__}.py`, `scripts/run_test_ci.py`
+- **Artifacts:** `docs/android-pairing.md`, `config/android.example.yaml`, `config/android.harness.json`, `config/gateway.example.yaml`, `config/backup.example.json`, `config/README.md`, `agent-plan/channels/{android-companion,index}.md`, `agent-plan/operations/hosting.md`, `src/channels/android/{status,approvals,projection,ci_checks,__init__}.py`, `scripts/prod05_android_checks.py`, `scripts/run_test_ci.py`
 
 ### PROD-06 — Google Calendar production adapter (soft confirm)
 - **Depends on:** —
