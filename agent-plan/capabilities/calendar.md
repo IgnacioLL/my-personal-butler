@@ -10,6 +10,7 @@ Let the agent see your availability and schedule things without colliding with r
 - Propose events
 - Create/update/cancel with **soft confirmation**
 - Respect quiet hours / buffers when planning
+- Conflict-aware suggestions (call out overlaps; propose free slots)
 
 ## Intents
 
@@ -32,14 +33,23 @@ Let the agent see your availability and schedule things without colliding with r
 - Prefer your historically liked time windows (from memory)
 - Leave travel buffers for physical appointments
 - When booking external services, hold a tentative local event only after approval strategy is clear
+- Never silently double-book — surface conflicts + alternatives on the soft-confirm card
 
 ## Integrations
 
-Start with Google Calendar (or whatever you already use). Keep provider-specific details in implementation notes later.
+**Provider:** Google Calendar (OAuth2 + Calendar API v3).
+
+| Mode | Adapter | Config |
+| --- | --- | --- |
+| Harness / CI | In-memory `StubCalendarAdapter` | `config/calendar.harness.json` |
+| Production | `GoogleCalendarAdapter` (stdlib HTTPS) | `config/production/calendar.json` + `calendar.env.example` |
+
+Soft-confirm write path is identical in both modes: `ActionGateway.propose` → Accept → `adapter.create`. Live Google writes require `CALENDAR_LIVE=1` (dry-run default). See [docs/calendar-production.md](../../docs/calendar-production.md) and [src/skills/calendar/SKILL.md](../../src/skills/calendar/SKILL.md).
 
 ## Acceptance criteria
 
-- [ ] Agent can summarize upcoming events accurately
-- [ ] Agent refuses to double-book without calling it out
-- [ ] Event creation requires confirmation
-- [ ] Timezone handling is correct
+- [x] Agent can summarize upcoming events accurately (store / sync_window)
+- [x] Agent refuses to double-book without calling it out (conflict + suggestions)
+- [x] Event creation requires confirmation (`INV-APPR-003`, E2E-04)
+- [x] Timezone handling is correct (payload `timezone` + Google `timeZone` fields)
+- [x] Production OAuth/config templates exist; secrets never committed

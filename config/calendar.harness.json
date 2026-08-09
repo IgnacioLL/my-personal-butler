@@ -1,5 +1,7 @@
 {
+  "skill": "calendar",
   "mode": "memory",
+  "provider": "in_memory",
   "live": false,
-  "description": "Harness/CI in-memory calendar (PROD-06). Soft-confirm writes via ActionGateway."
+  "notes": "Harness/CI default. StubCalendarAdapter + CalendarStore; soft confirm via ActionGateway (INV-APPR-003). Never set CALENDAR_MODE=google or CALENDAR_LIVE in CI."
 }
