@@ -85,6 +85,15 @@ from capabilities.reminders.store import (  # noqa: E402
     ReminderStatus,
     ReminderStore,
 )
+from capabilities.calendar.factory import (  # noqa: E402
+    build_calendar_adapter,
+    load_calendar_profile,
+)
+from capabilities.calendar.google import (  # noqa: E402
+    GoogleCalendarAdapter,
+    GoogleCalendarConfig,
+    load_google_calendar_config,
+)
 from capabilities.calendar.parse import looks_like_schedule, parse_schedule  # noqa: E402
 from capabilities.calendar.service import CalendarService  # noqa: E402
 from capabilities.calendar.store import CalendarStore  # noqa: E402
@@ -138,6 +147,11 @@ from channels.android.approvals import AndroidApprovalInboxApi  # noqa: E402
 from channels.android.notifications import AndroidNotificationCatcher  # noqa: E402
 from channels.android.projection import AndroidProjectionApi  # noqa: E402
 from channels.android.status import AndroidStatusApi  # noqa: E402
+from prod05_android_checks import (  # noqa: E402
+    run_android_approval_unit_checks as _run_android_approval_unit_checks,
+    run_android_status_unit_checks as _run_android_status_unit_checks,
+    run_prod05_android_config_checks as _run_prod05_android_config_checks,
+)
 from channels.voice.allowlist import (  # noqa: E402
     CALL_MODE_ALLOWED_TOOLS,
     CALL_MODE_FORBIDDEN_TOOLS,
@@ -3570,128 +3584,6 @@ def _run_selfmod_integration_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
-def _run_android_approval_unit_checks() -> list[dict[str, Any]]:
-    """Android approval inbox API: list/Accept/Deny/Edit + soft calendar gate."""
-    checks: list[dict[str, Any]] = []
-    clock = FakeClock()
-    gw = ActionGateway(clock=clock)
-    inbox = AndroidApprovalInboxApi(gw)
-
-    soft = gw.propose(
-        "calendar_create",
-        "Focus block",
-        {
-            "title": "Focus block",
-            "start": "2026-01-09T09:00:00+01:00",
-            "end": "2026-01-09T11:00:00+01:00",
-        },
-    )
-    pending = inbox.list_pending()
-    list_ok = (
-        soft.ok
-        and soft.approval_id is not None
-        and soft.tier == ApprovalTier.SOFT_CONFIRM.value
-        and not soft.executed
-        and gw.calendar.create_count == 0
-        and len(pending) == 1
-        and pending[0].id == soft.approval_id
-        and pending[0].action_type == "calendar_create"
-    )
-    checks.append(
-        {
-            "id": "unit.android_approval.list_pending_soft",
-            "result": "PASS" if list_ok else "FAIL",
-            "detail": (
-                f"tier={soft.tier} pending={len(pending)} "
-                f"create={gw.calendar.create_count}"
-            ),
-        }
-    )
-
-    assert soft.approval_id is not None
-    edited = inbox.edit(
-        soft.approval_id,
-        summary="Focus block (edited)",
-        payload_patch={"title": "Focus block (edited)"},
-    )
-    edit_ok = (
-        edited.summary == "Focus block (edited)"
-        and edited.payload.get("title") == "Focus block (edited)"
-        and edited.status == ApprovalStatus.PENDING.value
-        and gw.calendar.create_count == 0
-    )
-    checks.append(
-        {
-            "id": "unit.android_approval.edit_pending",
-            "result": "PASS" if edit_ok else "FAIL",
-            "detail": f"summary={edited.summary!r} create={gw.calendar.create_count}",
-        }
-    )
-
-    accepted = inbox.accept(soft.approval_id)
-    accept_ok = (
-        accepted.ok
-        and accepted.approval.status == ApprovalStatus.EXECUTED.value
-        and gw.calendar.create_count == 1
-        and len(inbox.list_pending()) == 0
-    )
-    checks.append(
-        {
-            "id": "unit.android_approval.accept_executes",
-            "result": "PASS" if accept_ok else "FAIL",
-            "detail": (
-                f"ok={accepted.ok} status={accepted.approval.status} "
-                f"create={gw.calendar.create_count}"
-            ),
-        }
-    )
-
-    deny_prop = gw.propose(
-        "calendar_create",
-        "Dentist",
-        {
-            "title": "Dentist",
-            "start": "2026-01-10T15:00:00+01:00",
-            "end": "2026-01-10T16:00:00+01:00",
-        },
-    )
-    assert deny_prop.approval_id is not None
-    denied = inbox.deny(deny_prop.approval_id)
-    late = gw.execute(deny_prop.approval_id)
-    deny_ok = (
-        denied.status == ApprovalStatus.DENIED.value
-        and gw.calendar.create_count == 1
-        and (not late.ok)
-        and gw.calendar.create_count == 1
-    )
-    checks.append(
-        {
-            "id": "unit.android_approval.deny_blocks_execute",
-            "result": "PASS" if deny_ok else "FAIL",
-            "detail": (
-                f"status={denied.status} late={late.reason} create={gw.calendar.create_count}"
-            ),
-        }
-    )
-
-    # Edit after deny must fail closed.
-    edit_blocked = False
-    try:
-        inbox.edit(deny_prop.approval_id, summary="nope")
-    except ApprovalError:
-        edit_blocked = True
-    checks.append(
-        {
-            "id": "unit.android_approval.edit_terminal_blocked",
-            "result": "PASS" if edit_blocked else "FAIL",
-            "detail": f"edit_blocked={edit_blocked}",
-        }
-    )
-
-    return checks
-
-
-
 def _run_android_status_unit_checks() -> list[dict[str, Any]]:
     """Android Status screen: kill switches + pending/open counts (PROD-05 surface)."""
     checks: list[dict[str, Any]] = []
@@ -3782,58 +3674,39 @@ def _run_android_status_unit_checks() -> list[dict[str, Any]]:
 
 
 def _run_prod05_android_config_checks(root: Path) -> list[dict[str, Any]]:
-    """PROD-05 config templates + Status API module present (CI doubles stay)."""
+    """PROD-05: production Android config templates + harness doubles map."""
     checks: list[dict[str, Any]] = []
     example = root / "config" / "android.example.yaml"
     harness = root / "config" / "android.harness.json"
-    pairing = root / "docs" / "android-pairing.md"
-    status_mod = root / "src" / "channels" / "android" / "status.py"
+    runbook = root / "docs" / "android-pairing.md"
 
-    files_ok = all(p.is_file() for p in (example, harness, pairing, status_mod))
+    files_ok = example.is_file() and harness.is_file() and runbook.is_file()
     checks.append(
         {
-            "id": "unit.android.prod05_files",
+            "id": "unit.prod05.android_config_files",
             "result": "PASS" if files_ok else "FAIL",
             "detail": (
-                f"example={example.is_file()} harness={harness.is_file()} "
-                f"pairing={pairing.is_file()} status={status_mod.is_file()}"
+                f"example={example.exists()} harness={harness.exists()} "
+                f"runbook={runbook.exists()}"
             ),
         }
     )
 
-    try:
-        harness_data = json.loads(harness.read_text(encoding="utf-8"))
-        doubles = dict(harness_data.get("doubles") or {})
-        features = dict(harness_data.get("features") or {})
-        harness_ok = (
+    doubles_ok = False
+    if harness.is_file():
+        raw = json.loads(harness.read_text(encoding="utf-8"))
+        doubles = raw.get("doubles") or {}
+        doubles_ok = (
             doubles.get("status") == "channels.android.status.AndroidStatusApi"
-            and doubles.get("approvals")
-            == "channels.android.approvals.AndroidApprovalInboxApi"
-            and features.get("status_kill_switches") is True
-            and features.get("self_mod_cards") is True
+            and doubles.get("approvals") == "channels.android.approvals.AndroidApprovalInboxApi"
+            and doubles.get("todos") == "channels.android.projection.AndroidProjectionApi"
+            and raw.get("production_config") == "config/android.example.yaml"
         )
-        example_text = example.read_text(encoding="utf-8")
-        example_ok = (
-            "freeze_self_mod" in example_text
-            and "self_mod_cards" in example_text
-            and "kill_switches" in example_text
-            and "accept" in example_text
-        )
-    except (OSError, json.JSONDecodeError, TypeError) as exc:
-        checks.append(
-            {
-                "id": "unit.android.prod05_config_shape",
-                "result": "FAIL",
-                "detail": f"parse_error:{exc}",
-            }
-        )
-        return checks
-
     checks.append(
         {
-            "id": "unit.android.prod05_config_shape",
-            "result": "PASS" if (harness_ok and example_ok) else "FAIL",
-            "detail": f"harness_ok={harness_ok} example_ok={example_ok}",
+            "id": "unit.prod05.android_harness_doubles",
+            "result": "PASS" if doubles_ok else "FAIL",
+            "detail": f"doubles_ok={doubles_ok}",
         }
     )
     return checks
